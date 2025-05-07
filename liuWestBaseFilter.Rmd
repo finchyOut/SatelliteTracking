@@ -1,0 +1,132 @@
+---
+title: "liuWestBaseFilter"
+output: html_document
+---
+
+Import the libraries
+```{r}
+library(nimble)
+library(nimbleSMC)
+library(readr)
+library(readr)
+library(fastDummies)
+```
+
+```{r}
+test1 <- finalTable(213)
+```
+
+```{r}
+print(test1$Type_NK[1])
+```
+
+
+
+Now that the file is oriented correctly. I now need to work on the actual nimble code. Slay. Time to build a model.
+```{r}
+#model based on
+t <- 100
+
+theLiuWestModel <- nimbleCode({
+  x[1] ~ dbin(xmu, 1)
+  y[1] ~ dnorm(ymu, 1)
+  for(i in 2:t){
+    x[i] ~ dbin(x[i-1], 1)
+    y[i] ~ dnorm((c *x[i-1] + d*(1- x[i-1])) , 1)
+  }
+  
+  # Priors on parameters
+  c ~ dnorm(1, 1)
+  d ~ dnorm(1, 1)
+  xmu ~ dnorm(0,1)
+  ymu ~ dnorm(0, 1)
+})
+```
+
+```{r}
+theLiuWestModel <- nimbleCode({
+  # Initial values for x and y
+  x[1] ~ dbin(xmu, 1)  # xmu is the probability of success for x[1]
+  y[1] ~ dnorm(ymu, 1)  # Normal distribution for y[1]
+  
+  for(i in 2:t){
+    # p is the probability of success in the binomial distribution
+    p[i] <- x[i-1]  # Use x[i-1] directly as the binary probability (either 0 or 1)
+    
+    # Binomial distribution for x[i] (Bernoulli trial with p = 0 or 1)
+    x[i] ~ dbin(p[i], 1)  # Binomial distribution with probability 'p[i]' and size 1
+    
+    # Transition for y
+    y[i] ~ dnorm(c * x[i-1] + d * (1 - x[i-1]), 1)  # Normal distribution for y[i]
+  }
+  
+  # Priors on parameters
+  c ~ dnorm(1, 1)  # Prior for parameter c
+  d ~ dnorm(1, 1)  # Prior for parameter d
+  xmu ~ dnorm(0, 1)  # Prior for initial value of x[1]
+  ymu ~ dnorm(0, 1)  # Prior for initial value of y[1]
+})
+
+
+```
+
+
+
+
+```{r}
+# build the model
+lwTimeModel <- nimbleModel(theLiuWestModel, 
+                          constants = list(t = t), 
+                          data = list( y = test1$Eccentricity[1:t]),
+                          inits = list( c = .5, d = .5),
+                          check = FALSE)
+
+
+lwTimeModel$xmu <- test1$Type_NK[1]
+lwTimeModel$ymu <- test1$Eccentricity[1]
+clwTimeModel <- compileNimble(lwTimeModel)
+```
+## Liu West
+
+We will now do the Liu West filter which will allow us to do inference on the unknown (but constant) parameters in our transition and observation models. 
+
+```{r}
+num_particles = 10
+LWTimeModel <- lwTimeModel$newModel(replicate = TRUE)
+compileNimble(LWTimeModel)
+# Build Liu-West filter, also 
+# specifying which top level parameters to estimate
+rLWF <- buildLiuWestFilter(LWTimeModel, "x", params = c("c", "d"),
+                           control = list(saveAll = TRUE))   
+#rLWF$run(10)
+cLWF <- compileNimble(rLWF,project = LWTimeModel)
+# Run Liu-West filter
+cLWF$run(num_particles)
+rLWF$run(num_particles)
+```
+
+
+```{r}
+#cLWF$run(100)
+#rLWF$run(100)
+#matrix(unlist(rLWF$mvEWSamples$x), nrow=num_particles, byrow=T)
+particles_x = matrix(unlist(rLWF$mvEWSamples$x),nrow=num_particles,byrow=T)
+#particles_a = matrix(unlist(rLWF$mvEWSamples$a),nrow=num_particles,byrow=T)
+#particles_b = matrix(unlist(rLWF$mvEWSamples$b),nrow=num_particles,byrow=T)
+particles_c = matrix(unlist(rLWF$mvEWSamples$c),nrow=num_particles,byrow=T)
+particles_d = matrix(unlist(rLWF$mvEWSamples$c),nrow=num_particles,byrow=T)
+hist(particles_c)
+```
+
+##Check Filtering Dist of Latent Variables
+```{r}
+mean_vec = c()
+for (i in 1:t){
+  mean_vec[i]= mean(particles_x[,i])
+}
+plot(1:t,mean_vec,type='l', col='blue')
+lines(1:t, x)
+```
+
+
+
