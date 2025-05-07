@@ -1,0 +1,159 @@
+---
+title: "bootstrap"
+output: html_document
+---
+
+---
+title: "nimbleIntro"
+output: html_document
+---
+Import the libraries
+```{r}
+library(nimble)
+library(nimbleSMC)
+library(readr)
+```
+
+```{r}
+test1 <- finalTable(213)
+#head(test1[420:424, c('StationKeeping', 'Timestamp') ])
+```
+
+
+
+Now that the file is oriented correctly. I now need to work on the actual nimble code. Slay. Time to build a model.
+```{r}
+#model based on
+t <- 1000
+
+theBasicModel <- nimbleCode({
+  x[1] ~ dbin(xmu, 1)
+  y[1] ~ dnorm(ymu, 1)
+  for(i in 2:t){
+    x[i] ~ dbin(x[i-1]* a + (1-x[i-1])*b, 1)
+    y[i] ~ dnorm((1-x[i])*(y[i-1] + cos(3.141593*i)), 1)
+  }
+  
+  # Priors on parameters
+  a ~ dnorm(0, 1)
+  b ~ dnorm(1, 1)
+  xmu ~ dnorm(0,1)
+  ymu ~ dnorm(0, 1)
+})
+```
+
+```{r}
+# build the model
+rTimeModel <- nimbleModel(theBasicModel, 
+                          constants = list(t = t), 
+                          data = list( y = test1$Eccentricity[1:t]),
+                          inits = list(a = .5, b = .5),
+                          check = FALSE)
+
+
+rTimeModel$xmu <- test1$Type_NK[1]
+rTimeModel$ymu <- test1$Eccentricity[1]
+cTimeModel <- compileNimble(rTimeModel)
+```
+# Boot strap
+You cannot run Liu west with a binomial dist because it is calling the parameter mean with a binom doesn't have. It has prob, and size
+Try boot strap instead
+```{r}
+# Build bootstrap filter
+rBootF <- buildBootstrapFilter(rTimeModel, "x", 
+                               control = list(thresh = 0.8, saveAll = TRUE, 
+                                              smoothing = FALSE))
+```
+
+```{r}
+cBootF <- compileNimble(rBootF, project = rTimeModel)
+```
+
+
+```{r}
+num_particles = 5
+rBootF$run(num_particles) #Run 5 particles thru the model
+```
+
+```{r}
+#print(rBootF$mvEWSamples$x)
+```
+
+
+```{r}
+particle_paths = rBootF$mvEWSamples$x  #Gives equally weighted samples from the posterior
+#mvWSamples gives weighted samples
+filtering_sample = matrix(0,nrow=num_particles,ncol=t)
+mean_filtering_dist = c()
+
+#Build data frame showing particle's path throughout the time steps... can be used to make filtering dist
+for(j in 2:(t-1)){
+  for(i in 1:num_particles){
+    filtering_sample[i,j] = particle_paths[[i]][j]}
+  mean_filtering_dist[j] = mean(filtering_sample[,j])
+}
+print(filtering_sample[,t])
+hist(filtering_sample[,t])
+print(c('True x(25) = ', test1$Type_NK[3:1000] ))
+```
+```{r}
+print(mean_filtering_dist)
+```
+
+
+```{r}
+#Can use filtering dist to give a probability essentially of what state we are in]
+tots <- print(length(mean_filtering_dist))
+print(length(test1$Type_NK[2:1000]))
+print(min(test1$Type_NK[2:1000]))
+lb = min(min(mean_filtering_dist[2:999]), min(test1$Type_NK[2:1000])) 
+ub = max(max(mean_filtering_dist[2:999]), max(test1$Type_NK[2:1000])) 
+print(lb)
+print(ub)
+plot(3:1000, mean_filtering_dist[2:999], type='l', ylim = c(lb,ub), col='blue')
+lines(3:1000,test1$Type_NK[3:1000], col = 'red')
+```
+
+```{r}
+# Estimate state via majority vote of particles
+vote_pred <- rep(2, 999)  # initialize with zeros
+for (i in 2:999) {
+  if (mean_filtering_dist[i] >= 0.95) {
+    vote_pred[i] <- 1
+  }
+  else{
+    vote_pred[i] <- 0
+  }
+}
+
+# Plot predicted vs true state
+plot(2:1000, vote_pred, type = 'l', ylim = c(lb, ub), col = 'blue', ylab = "Station Keeping", xlab = "Time")
+lines(2:1000, test1$Type_NK[2:1000], col = 'red')
+
+# Optional legend
+legend("topright", legend = c("Predicted", "True"), col = c("blue", "red"), lty = 1)
+
+# Compute error rate (assumes ground truth is test1$StationKeeping[2:1000])
+true_x <- test1$Type_NK[2:1000]
+misses <- sum(abs(true_x - vote_pred))
+error <- misses / length(vote_pred)
+print(paste("Error rate:", round(error, 3)))
+```
+
+
+
+
+```{r}
+### Check to see if the particles were saved at each iteration... or if it shows particle paths of last resample.
+#plot(1:t,filtering_sample[1,], type='l')
+count=0
+for( i in 1:num_particles){ 
+  for( j in 1:num_particles){ 
+      count = count+ prod(filtering_sample[i,1:(num_particles-1)] == filtering_sample[j,1:(num_particles-1)])
+    }
+}
+```
+
+
+
+
