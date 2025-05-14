@@ -1,0 +1,112 @@
+---
+title: "liuWestV5"
+output: html_document
+---
+
+```{r}
+library(nimble)
+
+code <- nimbleCode({
+  # Priors
+  p00 ~ dbeta(1, 1)  # P(x[t]=0 | x[t-1]=0)
+  p11 ~ dbeta(1, 1)  # P(x[t]=1 | x[t-1]=1)
+  mu0 ~ dnorm(0, 10)
+  mu1 ~ dnorm(0, 10)
+  sigma ~ dunif(0, 10)
+
+  # Initial state
+  x[1] ~ dbin(0.5, 1)  # Initial x (Bernoulli(0.5))
+  y[1] ~ dnorm(mu0 * (1 - x[1]) + mu1 * x[1], sd = sigma)
+
+  for(t in 2:T) {
+    # Transition model: x[t] depends on x[t-1]
+    prob[t] <- p11 * step(x[t-1] - 0.5) + (1 - p00) * (1 - step(x[t-1] - 0.5))
+    x[t] ~ dbin(prob[t], 1)
+
+    # Observation model: y[t] depends on current x[t]
+    y[t] ~ dnorm(mu0 * (1 - x[t]) + mu1 * x[t], sd = sigma)
+  }
+})
+```
+
+```{r}
+# Simulated data placeholder
+T <- 50
+
+startT <- 380
+testData <- finalTable(213)
+x <- testData$Type_NK[startT:(startT + T - 1)]
+y <- testData$Eccentricity[startT:(startT + T - 1)]
+data <- list(y = y)  # Replace with actual data
+
+constants <- list(T = T)
+
+inits <- list(
+  x = rbinom(T, 1, 0.5),
+  p00 = 0.9,
+  p11 = 0.9,
+  mu0 = -1,
+  mu1 = 1,
+  sigma = 1
+)
+```
+
+
+```{r}
+model <- nimbleModel(code, data = data, inits = inits, constants = constants)
+cModel <- compileNimble(model)
+```
+However, we aren't interested in MCMC here... we want to use a filtering algorithm. 
+## Liu West
+
+We will now do the Liu West filter which will allow us to do inference on the unknown (but constant) parameters in our transition and observation models.
+```{r}
+num_particles = 5
+LWTimeModel <- model$newModel(replicate = TRUE)
+cLWTimeModel <- compileNimble(LWTimeModel)
+
+```
+
+
+
+```{r}
+# Build Liu-West filter, also 
+# specifying which top level parameters to estimate
+rLWF <- buildLiuWestFilter(cLWTimeModel, "x", params = c("p00", "p11", "mu0", "mu1", "sigma"), control = list(saveAll = TRUE)) 
+```
+
+```{r}
+#rLWF$run(10)
+cLWF <- compileNimble(rLWF,project = LWTimeModel)
+```
+
+
+```{r}
+# Run Liu-West filter
+cLWF$run(num_particles)
+rLWF$run(num_particles)
+```
+
+
+```{r}
+#cLWF$run(100)
+#rLWF$run(100)
+#matrix(unlist(rLWF$mvEWSamples$x), nrow=num_particles, byrow=T)
+particles_x = matrix(unlist(rLWF$mvEWSamples$x),nrow=num_particles,byrow=T)
+#particles_a = matrix(unlist(rLWF$mvEWSamples$a),nrow=num_particles,byrow=T)
+#particles_b = matrix(unlist(rLWF$mvEWSamples$b),nrow=num_particles,byrow=T)
+#particles_c = matrix(unlist(rLWF$mvEWSamples$c),nrow=num_particles,byrow=T)
+#particles_d = matrix(unlist(rLWF$mvEWSamples$d),nrow=num_particles,byrow=T)
+hist(particles_x)
+```
+
+##Check Filtering Dist of Latent Variables
+```{r}
+mean_vec = c()
+for (i in 1:t){
+  mean_vec[i]= mean(particles_x[,i])
+}
+plot(1:t,mean_vec,type='l', col='blue')
+lines(1:t, x, col = 'red')
+```
+

@@ -1,0 +1,166 @@
+---
+title: "Nimble Playground"
+output: html_document
+date: "2025-04-18"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Purpose
+
+This R Markdown allows us to play around a little with Nimble based on https://r-nimble.org/html_manual/cha-algos-provided.html
+
+First we will build our model. This is our state space model... which for now has random parameters.
+
+```{r}
+#Load nimble packages
+library(nimble)
+library(nimbleSMC)
+
+# Building a simple linear state-space model. 
+# x is latent space, y is observed data
+timeModelCode <- nimbleCode({
+  x[1] ~ dnorm(mu_0, 1)
+  y[1] ~ dnorm(x[1], 1)
+  for(i in 2:t){
+    x[i] ~ dnorm(x[i-1] * a + b, 1)
+    y[i] ~ dnorm(x[i] * c, 1)
+  }
+  
+  a ~ dunif(0, 1)
+  b ~ dnorm(0, 1)
+  c ~ dnorm(1,1)
+  mu_0 ~ dnorm(0, 1)
+})
+```
+
+Now we will generate some fake data using the above state space model.
+
+```{r}
+
+# simulate some data
+t <- 25; mu_0 <- 1
+x <- rnorm(1 ,mu_0, 1)
+y <- rnorm(1, x, 1)
+a <- 0.5; b <- 1; c <- 1
+for(i in 2:t){
+  x[i] <- rnorm(1, x[i-1]*  a + b, 1)
+  y[i] <- rnorm(1, x[i] * c, 1)
+}
+```
+
+Under normal conditions, we could compile it and then use, e.g., MCMC on the compiled model. Note that, in the below, we are setting the unknown parameters in the state space models to known scalars. 
+
+```{r}
+
+# build the model
+rTimeModel <- nimbleModel(timeModelCode, constants = list(t = t), 
+                          data <- list(y = y), check = FALSE )
+
+# Set parameter values and compile the model
+rTimeModel$a <- 0.5
+rTimeModel$b <- 1
+rTimeModel$c <- 1
+rTimeModel$mu_0 <- 1
+
+cTimeModel <- compileNimble(rTimeModel)
+```
+
+However, we aren't interested in MCMC here... we want to use a filtering algorithm. 
+
+## Bootstrap Filter
+
+We start with the bootstrap filter. We build and compile the model first. 
+
+```{r}
+
+# Build bootstrap filter
+rBootF <- buildBootstrapFilter(rTimeModel, "x", 
+                               control = list(thresh = 0.8, saveAll = TRUE, 
+                                              smoothing = FALSE))
+# Compile filter   
+cBootF <- compileNimble(rBootF,project = rTimeModel)
+```
+
+Thereafter, we can run it to get some information on it. 
+
+```{r}
+#Get Filtering Dist
+num_particles = 100
+rBootF$run(num_particles) #Run 5 particles thru the model
+particle_paths = rBootF$mvEWSamples$x  #Gives equally weighted samples from the posterior
+#mvWSamples gives weighted samples
+filtering_sample = matrix(0,nrow=num_particles,ncol=t)
+mean_filtering_dist = c()
+
+#Build data frame showing particle's path throughout the time steps... can be used to make filtering dist
+for(j in 1:t){
+  for(i in 1:num_particles){
+    filtering_sample[i,j] = particle_paths[[i]][j]}
+ mean_filtering_dist[j] = mean(filtering_sample[,j])
+}
+hist(filtering_sample[,t])
+print(c('True x(25) = ', x[t] ))
+```
+
+We can also get some summary statistics from the model that may make things easier when fitting models. 
+
+```{r}
+# Run bootstrap filter, which returns estimate of model log-likelihood
+bootLLEst <- rBootF$lastLogLik
+bootESS <- rBootF$returnESS()
+```
+
+To get an idea of how well it's working, as a rough hack, we can track the mean of our filtering distribution versus truth. 
+
+```{r}
+lb = min(min(mean_filtering_dist), min(x)) -1
+ub = max(max(mean_filtering_dist), max(x)) +1
+plot(1:t, mean_filtering_dist, type='l', ylim = c(lb,ub), col='blue')
+lines(1:t,x)
+```
+
+## Liu West
+
+We will now do the Liu West filter which will allow us to do inference on the unknown (but constant) parameters in our transition and observation models. 
+
+```{r}
+num_particles = 100
+LWTimeModel <- rTimeModel$newModel(replicate = TRUE)
+compileNimble(LWTimeModel)
+# Build Liu-West filter, also 
+# specifying which top level parameters to estimate
+rLWF <- buildLiuWestFilter(LWTimeModel, "x", params = c("a", "b", "c"),
+                           control = list(saveAll = TRUE))   
+#rLWF$run(10)
+cLWF <- compileNimble(rLWF,project = LWTimeModel)
+# Run Liu-West filter
+cLWF$run(num_particles)
+rLWF$run(num_particles)
+```
+
+
+```{r}
+#cLWF$run(100)
+#rLWF$run(100)
+#matrix(unlist(rLWF$mvEWSamples$x), nrow=num_particles, byrow=T)
+particles_x = matrix(unlist(rLWF$mvEWSamples$x),nrow=num_particles,byrow=T)
+particles_a = matrix(unlist(rLWF$mvEWSamples$a),nrow=num_particles,byrow=T)
+particles_b = matrix(unlist(rLWF$mvEWSamples$b),nrow=num_particles,byrow=T)
+particles_c = matrix(unlist(rLWF$mvEWSamples$c),nrow=num_particles,byrow=T)
+hist(particles_c)
+```
+
+##Check Filtering Dist of Latent Variables
+```{r}
+mean_vec = c()
+for (i in 1:t){
+  mean_vec[i]= mean(particles_x[,i])
+}
+plot(1:t,mean_vec,type='l', col='blue')
+lines(1:t, x)
+```
+
+

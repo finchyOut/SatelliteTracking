@@ -1,0 +1,141 @@
+---
+title: "PMCMCV2"
+output: html_document
+---
+
+```{r}
+library(nimble)
+library(nimbleSMC)
+
+#---------------------------------------------------
+# 1. Define the State Space Model in NIMBLE
+#---------------------------------------------------
+ssmCode <- nimbleCode({
+  x[1] ~ dbin(mu_0, 1)
+  y[1] ~ dnorm(x[1], 1)
+  
+  for(i in 2:T) {
+    x[i] ~ dbin(x[i-1] * a + (1 - x[i-1]) * b, 1)
+    y[i] ~ dnorm(x[i] * c * cos(3.14159 * i) + (1 - x[i]) * d * cos(3.14159 * i), 1)
+  }
+
+  # Priors
+  a ~ dunif(0, 1)
+  b ~ dunif(0, 1)
+  c ~ dnorm(1, 1)
+  d ~ dnorm(1, 1)
+  mu_0 ~ dunif(0, 1)
+})
+
+#---------------------------------------------------
+# 2. Simulate Fake Data
+#---------------------------------------------------
+T <- 100
+startT <- 380
+testData <- finalTable(213)
+x <- testData$Type_NK[startT:(startT + T - 1)]
+y <- testData$Eccentricity[startT:(startT + T - 1)]
+
+
+#---------------------------------------------------
+# 3. Build and Compile the Model
+#---------------------------------------------------
+inits <- list(
+  x = rbinom(T, 1, 0.5),
+  a = 0.5,
+  b = 0.5,
+  c = 1,
+  d = -1,
+  mu_0 = 0.5
+)
+
+constants <- list(T = T)
+data <- list(y = y)
+
+model <- nimbleModel(ssmCode, constants = constants, data = data, inits = inits, check = TRUE)
+cModel <- compileNimble(model)
+
+#---------------------------------------------------
+# 4. Configure and Build PMCMC
+#---------------------------------------------------
+conf <- configureMCMC(model, nodes = NULL)
+
+conf$addSampler(
+  target = c("a", "b", "c", "d", "mu_0"),
+  type = "RW_PF_block",
+  control = list(
+    latents = "x",
+    propCov = diag(5),
+    pfType = "bootstrap",  # particle filter type
+    pfNparticles = 100
+  )
+)
+
+mcmc <- buildMCMC(conf)
+cmcmc <- compileNimble(mcmc, project = model)
+
+#---------------------------------------------------
+# 5. Run the PMCMC Sampler
+#---------------------------------------------------
+samples <- runMCMC(cmcmc, niter = 1000, nburnin = 200, progressBar = TRUE)
+
+#---------------------------------------------------
+# 6. Posterior Mean of Latent States
+#---------------------------------------------------
+x_samples <- samples[, grep("^x\\[", colnames(samples))]
+x_means <- colMeans(x_samples)
+
+plot(1:T, x_means, type = "l", col = "blue", ylim = c(0, 1),
+     xlab = "Time", ylab = "Estimated E[x_t]")
+lines(1:T, x, col = "red", lty = 2)
+legend("topright", legend = c("Estimated x", "True x"), col = c("blue", "red"), lty = c(1,2))
+
+```
+```{r}
+print(samples)
+```
+```{r}
+hist(samples[,1])
+```
+Calculate what it actually predicts
+```{r}
+x[i-1] * a + (1 - x[i-1]) * b
+
+```
+Now you need to simulate data from this model
+```{r}
+getSimulatedData <- function(samples){
+  simY <- []
+  for (row in samples):
+    samples[row]$SimY = 
+}
+```
+
+```{r}
+T <- 100
+true_a <- 0.8
+true_b <- 0.3
+true_c <- 2
+true_d <- -2
+true_mu0 <- 0.6
+#This will take one of the 
+simPosterior <- function(a, b, c, d, mu_0, T){
+  x <- numeric(T)
+  y <- numeric(T)
+  x1[1] <- rbinom(1, 1, true_mu0)
+  y1[1] <- rnorm(1, mean = x[1], sd = 1)
+  
+  for (i in 2:T) {
+    prob <- ifelse(x1[i-1] == 1, true_a, true_b)
+    x1[i] <- rbinom(1, 1, prob)
+    mu_y <- x1[i] * true_c * cos(pi * i) + (1 - x1[i]) * true_d * cos(pi * i)
+    y1[i] <- rnorm(1, mean = mu_y, sd = 1)
+  }
+  return (x1, y1)
+}
+```
+
+
+
+
+

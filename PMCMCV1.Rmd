@@ -1,0 +1,135 @@
+---
+title: "PMCMCV1"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Purpose
+
+This R Markdown allows us to play around a little with Nimble based on https://r-nimble.org/html_manual/cha-algos-provided.html
+
+First we will build our model. This is our state space model... which for now has random parameters.
+
+```{r}
+#Load nimble packages
+library(nimble)
+library(nimbleSMC)
+
+# Building a simple linear state-space model. 
+# x is latent space, y is observed data
+timeModelCode <- nimbleCode({
+  x[1] ~ dbin(mu_0, 1)
+  y[1] ~ dnorm(x[1], 1)
+  for(i in 2:t){
+    x[i] ~ dbin(x[i-1]*a + (1-x[i-1])*b, 1)
+    y[i] ~ dnorm(x[i]*c*cos(3.14159*i)+(1-x[i])*d*cos(3.14159*i), 1)
+  }
+  
+  a ~ dunif(0, 1)
+  b ~ dunif(0, 1)
+  c ~ dnorm(1,1)
+  d ~ dnorm(1,1)
+  mu_0 ~ dunif(0, 1)
+})
+```
+
+```{r}
+ssmCode <- nimbleCode({
+  x[1] ~ dbin(mu_0, 1)
+  y[1] ~ dnorm(x[1], 1)
+  
+  for(i in 2:T) {
+    x[i] ~ dbin(x[i-1] * a + (1 - x[i-1]) * b, 1)
+    y[i] ~ dnorm(x[i] * c * cos(3.14159 * i) + (1 - x[i]) * d * cos(3.14159 * i), 1)
+  }
+
+  # Priors
+  a ~ dunif(0, 1)
+  b ~ dunif(0, 1)
+  c ~ dnorm(1, 1)
+  d ~ dnorm(1, 1)
+  mu_0 ~ dunif(0, 1)
+})
+```
+
+
+
+Now we will generate some fake data using the above state space model.
+
+```{r}
+set.seed(2)
+t <- 100;
+startTime <- 380
+x1 <- testData$Type_NK[startTime:(startTime + t )]
+y1 <- testData$Eccentricity[startTime:(startTime + t )]
+```
+
+Under normal conditions, we could compile it and then use, e.g., MCMC on the compiled model. Note that, in the below, we are setting the unknown parameters in the state space models to known scalars. 
+
+```{r}
+rTimeModel <- nimbleModel(timeModelCode, 
+                          constants = list(t = t), 
+                          data = list(y = y), 
+                          inits = list(a = 0.5, b = 0.5, c = 1, d = -1, mu_0 = 0.5, x = rbinom(t, 1, 0.5)),
+                          check = TRUE)
+```
+```{r}
+cTimeModel <- compileNimble(rTimeModel)
+```
+
+
+
+
+
+# build the model
+rTimeModel <- nimbleModel(timeModelCode, constants = list(t = t), 
+                          data <- list(y = y), check = FALSE )
+
+cTimeModel <- compileNimble(rTimeModel)
+
+However, we aren't interested in MCMC here... we want to use a filtering algorithm. 
+## Time for the PMCMCM
+
+We will now do the Liu West filter which will allow us to do inference on the unknown (but constant) parameters in our transition and observation models.
+```{r}
+num_particles = 100
+timeConf <- configureMCMC(rTimeModel, nodes = NULL) # empty MCMC configuration
+```
+
+
+```{r}
+# Add random walk PMCMC sampler with particle number optimization.
+timeConf$addSampler(target = c("a", "b", "c", "d", "mu_0"), type = "RW_PF_block",
+                    control = list(propCov= diag(5),
+                                    pfType = "bootstrap",
+                                   #adaptScaleOnly = FALSE,
+                                 latents = "x",
+                                 pfNparticles = 100
+                                 #pfOptimizeNparticles = TRUE
+                                 ))
+```
+
+```{r}
+timeMCMC <- buildMCMC(timeConf)
+cTimeMCMC <- compileNimble(timeMCMC, project = rTimeModel)
+mcmcSamples <- runMCMC(cTimeMCMC, niter = 100, nburnin = 50)
+```
+
+
+
+```{r}
+x_samples <- mcmcSamples[, grep("^x\\[", colnames(mcmcSamples))]
+x_means <- colMeans(x_samples)
+
+plot(1:t, x_means, type = 'l', col = "blue", ylim = c(0, 1),
+     ylab = "Posterior mean of x[t]", xlab = "Time")
+lines(1:t, x, col = "red", lty = 2)
+legend("topright", legend = c("Estimated x", "True x"), col = c("blue", "red"), lty = c(1,2))
+
+```
+
+
+

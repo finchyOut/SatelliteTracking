@@ -1,0 +1,112 @@
+---
+title: "InitializationFunctions"
+output: html_document
+---
+Install
+```{r}
+#install.packages("fastDummies")
+```
+
+
+Load Packages
+```{r}
+library(readr)
+library(fastDummies)
+```
+
+
+
+```{r}
+getSatelliteMovements <-function(number){
+  combine1 <- paste0(number, ".csv")
+  file_path <- paste0("../Data/phase_1/train_with_timestamps/", combine1)
+  sateliteInfo <- read_csv(file_path)
+  sateliteInfo$RowIndex <- seq_len(nrow(sateliteInfo)) -1
+
+  return (sateliteInfo)
+}
+```
+
+```{r}
+#test1 <- getSatelliteMovements(213)
+#tail(test1, 1)
+```
+
+```{r}
+getSatelliteStationKeeping <- function(number){
+  satelliteInfo <- read_csv("../Data/phase_1/train_labels.csv")
+  #get only the satellites info
+  filteredInfo <- satelliteInfo[satelliteInfo$ObjectID == number, ]
+  return (filteredInfo)
+}
+
+```
+
+```{r}
+#head(getSatelliteStationKeeping(213))
+```
+
+```{r}
+combineTables <- function(number) {
+  satelliteInfo <- getSatelliteMovements(number)
+  satelliteSK <- getSatelliteStationKeeping(number)
+  
+  satelliteInfo$Direction <- NA  # initialize new column
+  
+  i <- 1
+  j <- 2
+  
+  for (row in 1:nrow(satelliteInfo)) {
+    currentIndex <- satelliteInfo$RowIndex[row]
+    
+    if (j <= nrow(satelliteSK) && currentIndex < satelliteSK$TimeIndex[j]) {
+      satelliteInfo$Direction[row] <- satelliteSK$Direction[i]
+      satelliteInfo$Node[row] <- satelliteSK$Node[i]
+      satelliteInfo$Type[row] <- satelliteSK$Type[i]
+    } else {
+      while (j <= nrow(satelliteSK) && currentIndex >= satelliteSK$TimeIndex[j]) {
+        i <- j
+        j <- j + 1
+      }
+      if (i <= nrow(satelliteSK)) {
+        satelliteInfo$Direction[row] <- satelliteSK$Direction[i]
+        satelliteInfo$Node[row] <- satelliteSK$Node[i]
+        satelliteInfo$Type[row] <- satelliteSK$Type[i]
+      }
+    }
+  }
+  
+  return(satelliteInfo)
+}
+```
+
+```{r}
+#test1 <- combineTables(213)
+```
+```{r}
+#head(test1[760:769, ])
+```
+```{r}
+#tail(test1, 1)
+```
+
+
+
+```{r}
+finalTable <- function(number){
+  theTable <- combineTables(213)
+  finalTable <- dummy_cols(
+  theTable,
+  select_columns = c("Node", "Type", "Direction"),
+  remove_first_dummy = FALSE  # set to TRUE if you want k-1 encoding
+  )
+  return(finalTable)
+}
+```
+
+```{r}
+#test2 <- finalTable(213)
+#head(test2)
+```
+
+

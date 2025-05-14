@@ -1,0 +1,99 @@
+---
+title: "baseBootstrap"
+output: html_document
+---
+
+```{r}
+library(nimble)
+library(nimbleSMC)
+
+# Building a simple linear state-space model. 
+# x is latent space, y is observed data
+timeModelCode <- nimbleCode({
+  x[1] ~ dbin(mu_0, 1)
+  y[1] ~ dnorm(x[1], 1)
+  for(i in 2:t){
+    x[i] ~ dbin(x[i-1]* a + (1-x[i-1])*b, 1)
+    y[i] ~ dnorm(x[i]*1*c+2*(1-x[i]), 1)
+  }
+  
+  a ~ dunif(0, 1)
+  b ~ dunif(0, 1)
+  c ~ dnorm(1,1)
+  mu_0 ~ dnorm(0, 1)
+})
+
+set.seed(2)
+t <- 100; mu_0 <- 1
+x <- rbinom(1,1, mu_0)
+y <- rnorm(1, x, 1)
+a <- 0.5; b <- 1; c <- 1
+for(i in 2:t){
+  x[i] <- rbinom(1,1,x[i-1]* a + (1-x[i-1])*b )# rnorm(1, x[i-1] * a + b, 1)
+  y[i] <- rnorm(1, x[i]*1*c+2*(1-x[i]), 1)
+}
+
+rTimeModel <- nimbleModel(timeModelCode, constants = list(t = t), 
+                          data <- list(y = y), check = FALSE )
+
+# Set parameter values and compile the model
+rTimeModel$a <- 0.5
+rTimeModel$b <- 1
+rTimeModel$c <- 1
+rTimeModel$mu_0 <- 1
+
+cTimeModel <- compileNimble(rTimeModel)
+
+# Build bootstrap filter
+rBootF <- buildBootstrapFilter(rTimeModel, "x", 
+                               control = list(thresh = 0.8, saveAll = TRUE, 
+                                              smoothing = FALSE))
+# Compile filter   
+cBootF <- compileNimble(rBootF,project = rTimeModel)
+
+num_particles = 100
+rBootF$run(num_particles) #Run 5 particles thru the model
+particle_paths = rBootF$mvEWSamples$x  #Gives equally weighted samples from the posterior
+#mvWSamples gives weighted samples
+filtering_sample = matrix(0,nrow=num_particles,ncol=t)
+mean_filtering_dist = c()
+
+#Build data frame showing particle's path throughout the time steps... can be used to make filtering dist
+for(j in 1:t){
+  for(i in 1:num_particles){
+    filtering_sample[i,j] = particle_paths[[i]][j]}
+  mean_filtering_dist[j] = mean(filtering_sample[,j])
+}
+hist(filtering_sample[,t])
+print(c('True x(25) = ', x[t] ))
+
+#Can use filtering dist to give a probability essentially of what state we are in
+lb = min(min(mean_filtering_dist), min(x)) 
+ub = max(max(mean_filtering_dist), max(x)) 
+plot(1:t, mean_filtering_dist, type='l', ylim = c(lb,ub), col='blue')
+lines(1:t,x)
+
+
+#Estimate state via a vote of the particle
+vote_pred = rep(0,t)
+for (i in 1:t){
+  if (mean_filtering_dist[i]>=0.5){
+    vote_pred[i]=1
+  }
+}
+plot(1:t, vote_pred, type='l', ylim = c(lb,ub), col='blue')
+lines(1:t,x)
+misses = sum(abs(x-vote_pred))
+error = misses/t
+
+### Check to see if the particles were saved at each iteration... or if it shows particle paths of last resample.
+#plot(1:t,filtering_sample[1,], type='l')
+count=0
+for( i in 1:num_particles){ 
+  for( j in 1:num_particles){ 
+      count = count+ prod(filtering_sample[i,1:(num_particles-1)] == filtering_sample[j,1:(num_particles-1)])
+    }
+}
+
+```
+

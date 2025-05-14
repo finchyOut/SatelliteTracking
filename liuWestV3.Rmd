@@ -1,8 +1,8 @@
 ---
-title: "Nimble Playground"
+title: "liuWestV3"
 output: html_document
-date: "2025-04-18"
 ---
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -25,13 +25,14 @@ timeModelCode <- nimbleCode({
   x[1] ~ dnorm(mu_0, 1)
   y[1] ~ dnorm(x[1], 1)
   for(i in 2:t){
-    x[i] ~ dnorm(x[i-1] * a + b, 1)
-    y[i] ~ dnorm(x[i] * c, 1)
+    x[i] ~ dnorm(x[i-1]*a + (1-x[i-1])*b, 0.1)
+    y[i] ~ dnorm(x[i]*c*cos(3.14159*i)+(1-x[i])*d*cos(3.14159*i), 1)
   }
   
   a ~ dunif(0, 1)
-  b ~ dnorm(0, 1)
+  b ~ dunif(0, 1)
   c ~ dnorm(1,1)
+  d ~ dnorm(1,1)
   mu_0 ~ dnorm(0, 1)
 })
 ```
@@ -39,16 +40,11 @@ timeModelCode <- nimbleCode({
 Now we will generate some fake data using the above state space model.
 
 ```{r}
-
-# simulate some data
-t <- 25; mu_0 <- 1
-x <- rnorm(1 ,mu_0, 1)
-y <- rnorm(1, x, 1)
-a <- 0.5; b <- 1; c <- 1
-for(i in 2:t){
-  x[i] <- rnorm(1, x[i-1]*  a + b, 1)
-  y[i] <- rnorm(1, x[i] * c, 1)
-}
+set.seed(2)
+t <- 100;
+startTime <- 380
+x <- testData$Node_AD[startTime:(startTime + t - 1)]
+y <- testData$Eccentricity[startTime:(startTime + t - 1)]
 ```
 
 Under normal conditions, we could compile it and then use, e.g., MCMC on the compiled model. Note that, in the below, we are setting the unknown parameters in the state space models to known scalars. 
@@ -65,18 +61,29 @@ cTimeModel <- compileNimble(rTimeModel)
 However, we aren't interested in MCMC here... we want to use a filtering algorithm. 
 ## Liu West
 
-We will now do the Liu West filter which will allow us to do inference on the unknown (but constant) parameters in our transition and observation models. 
-
+We will now do the Liu West filter which will allow us to do inference on the unknown (but constant) parameters in our transition and observation models.
 ```{r}
 num_particles = 100
 LWTimeModel <- rTimeModel$newModel(replicate = TRUE)
 compileNimble(LWTimeModel)
+```
+
+
+
+```{r}
 # Build Liu-West filter, also 
 # specifying which top level parameters to estimate
-rLWF <- buildLiuWestFilter(LWTimeModel, "x", params = c("a", "b", "c"),
-                           control = list(saveAll = TRUE))   
+rLWF <- buildLiuWestFilter(LWTimeModel, "x", params = c("a", "b", "c", "d"),
+                           control = list(saveAll = TRUE)) 
+```
+
+```{r}
 #rLWF$run(10)
 cLWF <- compileNimble(rLWF,project = LWTimeModel)
+```
+
+
+```{r}
 # Run Liu-West filter
 cLWF$run(num_particles)
 rLWF$run(num_particles)
@@ -91,7 +98,8 @@ particles_x = matrix(unlist(rLWF$mvEWSamples$x),nrow=num_particles,byrow=T)
 particles_a = matrix(unlist(rLWF$mvEWSamples$a),nrow=num_particles,byrow=T)
 particles_b = matrix(unlist(rLWF$mvEWSamples$b),nrow=num_particles,byrow=T)
 particles_c = matrix(unlist(rLWF$mvEWSamples$c),nrow=num_particles,byrow=T)
-hist(particles_c)
+particles_d = matrix(unlist(rLWF$mvEWSamples$d),nrow=num_particles,byrow=T)
+hist(particles_x)
 ```
 
 ##Check Filtering Dist of Latent Variables
@@ -101,7 +109,8 @@ for (i in 1:t){
   mean_vec[i]= mean(particles_x[,i])
 }
 plot(1:t,mean_vec,type='l', col='blue')
-lines(1:t, x)
+lines(1:t, x, col = 'red')
+#red is actual, blue is predicted
 ```
 
 
