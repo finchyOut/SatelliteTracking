@@ -1,0 +1,151 @@
+---
+title: "PMCMCV3"
+output: html_document
+---
+
+```{r}
+library(nimble)
+library(nimbleSMC)
+
+#---------------------------------------------------
+# 1. Define the State Space Model in NIMBLE
+#---------------------------------------------------
+ssmCode <- nimbleCode({
+  x[1] ~ dbin(mu_0, 1)
+  y[1] ~ dnorm(x[1], 1)
+  
+  for(i in 2:T) {
+    x[i] ~ dbin(x[i-1] * a + (1 - x[i-1]) * b, 1)
+    y[i] ~ dnorm(x[i] * c * cos(3.14159 * i) + (1 - x[i]) * d * cos(3.14159 * i), 1)
+  }
+
+  # Priors
+  a ~ dunif(0, 1)
+  b ~ dunif(0, 1)
+  c ~ dnorm(1, 1)
+  d ~ dnorm(1, 1)
+  mu_0 ~ dunif(0, 1)
+})
+```
+
+```{r}
+# intialize what are the x, y, number of time steps, and the satellite you want to test
+#the number of steps
+T <- 100
+#the starting time step
+startT <- 380
+#which satellite you want to test
+testData <- finalTable(213)
+#the nodes you want to test on 
+x <- testData$Type_NK[startT:(startT + T - 1)]
+y <- testData$Eccentricity[startT:(startT + T - 1)]
+```
+
+```{r}
+#Finally input your initial estimates for the specified parameters
+inits <- list(
+  x = rbinom(T, 1, 0.5),
+  a = 0.2,
+  b = 0.3,
+  c = 0,
+  d = 0,
+  mu_0 = 0
+)
+
+#make list of the parameters
+parameters <- c("a", "b", "c", "d", "mu_0")
+```
+
+
+```{r}
+#make sure you run the pmcmc function before calling
+samples <- pmcmc(ssmCode, T, startT, x, y, inits, parameters, 100, 5000)
+```
+
+
+
+
+```{r}
+#make sure the simulation function matches
+simulate_x <- function(a, b, mu_0, T) {
+  x <- numeric(T)
+  x[1] <- rbinom(1, 1, mu_0)
+  for (i in 2:T) {
+    prob <- x[i - 1] * a + (1 - x[i - 1]) * b
+    x[i] <- rbinom(1, 1, prob)
+  }
+  return(x)
+}
+```
+
+```{r}
+n <- 100  # number of samples to evaluate
+errors <- numeric(n)
+
+for (i in 1:n) {
+  params <- samples2[i, ]
+  x_sim <- simulate_x(params["a"], params["b"], params["mu_0"], T)
+  errors[i] <- mean((x - x_sim)^2)  # or: 1 - mean(x_true == x_sim)
+}
+
+best_idx <- which.min(errors)
+best_params <- samples2[best_idx, ]
+```
+
+
+```{r}
+x_best_sim <- simulate_x(best_params["a"], best_params["b"], best_params["mu_0"], T)
+plot(x, type = 's', col = "black", lwd = 2, main = "Latent State Comparison")
+lines(x_best_sim, col = "blue", lty = 2)
+legend("topright", legend = c("True x", "Simulated x"), col = c("black", "blue"), lty = 1:2)
+```
+```{r}
+rmse <- sqrt(mean((x - x_sim)^2))
+print(rmse)
+```
+```{r}
+
+```
+
+
+
+
+
+
+The model for this code:
+```{r}
+pmcmc <- function(modelCodeInitial, numSteps, startStep, true_x, true_y, initialList, paramList, numParticles, numIter ){
+  constants <- list(T = numSteps)
+  data <- list(y = true_y)
+
+  model <- nimbleModel(modelCodeInitial, constants = constants, data = data, inits = initialList, check = TRUE)
+  cModel <- compileNimble(model)
+  
+  
+  conf <- configureMCMC(model, nodes = NULL)
+  
+  conf$addSampler(
+    target = paramList,
+    type = "RW_PF_block",
+    control = list(
+      latents = "x",
+      propCov = diag(length(paramList)),
+      pfType = "bootstrap",  # particle filter type
+      pfNparticles = numParticles
+    )
+  )
+  
+  conf$addMonitors("x") 
+  
+  mcmc <- buildMCMC(conf)
+  cmcmc <- compileNimble(mcmc, project = model)
+  
+  samples2 <- runMCMC(cmcmc, niter = 1000, nburnin = 200, progressBar = TRUE)
+  
+  return (samples2)
+}
+```
+
+
+
+

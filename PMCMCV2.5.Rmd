@@ -1,0 +1,232 @@
+---
+title: "PMCMCV2.5"
+output: html_document
+---
+
+```{r}
+library(nimble)
+library(nimbleSMC)
+
+#---------------------------------------------------
+# 1. Define the State Space Model in NIMBLE
+#---------------------------------------------------
+ssmCode <- nimbleCode({
+  x[1] ~ dbin(mu_0, 1)
+  y[1] ~ dnorm(x[1], 1)
+  
+  for(i in 2:T) {
+    x[i] ~ dbin(x[i-1] * a + (1 - x[i-1]) * b, 1)
+    y[i] ~ dnorm(x[i] * c * cos(3.14159 * i) + (1 - x[i]) * d * cos(3.14159 * i), 1)
+  }
+
+  # Priors
+  a ~ dunif(0, 1)
+  b ~ dunif(0, 1)
+  c ~ dnorm(1, 1)
+  d ~ dnorm(1, 1)
+  mu_0 ~ dunif(0, 1)
+})
+```
+
+
+```{r}
+#---------------------------------------------------
+# 2. Simulate Fake Data
+#---------------------------------------------------
+#x and y will contain 100 (T) entries starting from point time step start T
+T <- 100
+startT <- 380
+testData <- finalTable(213)
+x <- testData$Type_NK[startT:(startT + T - 1)]
+y <- testData$Eccentricity[startT:(startT + T - 1)]
+
+print(length(x))
+
+```
+
+
+```{r}
+#---------------------------------------------------
+# 3. Build and Compile the Model
+#---------------------------------------------------
+inits <- list(
+  x = rbinom(T, 1, 0.5),
+  a = 0.2,
+  b = 0.3,
+  c = 0,
+  d = 0,
+  mu_0 = 0
+)
+
+constants <- list(T = T)
+data <- list(y = y)
+
+model <- nimbleModel(ssmCode, constants = constants, data = data, inits = inits, check = TRUE)
+cModel <- compileNimble(model)
+```
+
+```{r}
+#---------------------------------------------------
+# 4. Configure and Build PMCMC
+#---------------------------------------------------
+conf <- configureMCMC(model, nodes = NULL)
+
+conf$addSampler(
+  target = c("a", "b", "c", "d", "mu_0"),
+  type = "RW_PF_block",
+  control = list(
+    latents = "x",
+    propCov = diag(5),
+    pfType = "bootstrap",  # particle filter type
+    pfNparticles = 100
+  )
+)
+
+conf$addMonitors("x") 
+
+mcmc <- buildMCMC(conf)
+cmcmc <- compileNimble(mcmc, project = model)
+```
+
+```{r}
+#---------------------------------------------------
+# 5. Run the PMCMC Sampler
+#---------------------------------------------------
+samples2 <- runMCMC(cmcmc, niter = 1000, nburnin = 200, progressBar = TRUE)
+```
+```{r}
+#colnames(samples2)
+```
+
+
+
+```{r}
+#---------------------------------------------------
+# 6. Posterior Mean of Latent States
+#---------------------------------------------------
+x_samples <- samples2[, grep("^x\\[", colnames(samples2))]
+x_means <- colMeans(x_samples)
+#print(x_samples)
+#print(x_means)
+
+```
+
+
+```{r}
+plot(1:T, x_means, type = "l", col = "blue", ylim = c(0, 1),
+     xlab = "Time", ylab = "Estimated E[x_t]")
+lines(1:T, x, col = "red", lty = 2)
+legend("topright", legend = c("Estimated x", "True x"), col = c("blue", "red"), lty = c(1,2))
+```
+
+
+
+```{r}
+#print(samples2)
+```
+
+```{r}
+hist(samples2[,1])
+```
+
+```{r}
+simulate_y <- function(a, b, c, d, mu_0, T) {
+  x <- numeric(T)
+  y_sim <- numeric(T)
+  x[1] <- rbinom(1, 1, mu_0)
+  y_sim[1] <- rnorm(1, x[1], 1)
+  
+  for (i in 2:T) {
+    prob <- x[i-1] * a + (1 - x[i-1]) * b
+    x[i] <- rbinom(1, 1, prob)
+    mu <- x[i] * c * cos(pi * i) + (1 - x[i]) * d * cos(pi * i)
+    y_sim[i] <- rnorm(1, mu, 1)
+  }
+  return(y_sim)
+}
+
+# Loop through a subset of parameter samples
+n <- 100  # for efficiency
+errors <- numeric(n)
+
+for (i in 1:n) {
+  params <- samples2[i, ]
+  y_pred <- simulate_y(params["a"], params["b"], params["c"], params["d"], params["mu_0"], T)
+  errors[i] <- mean((y - y_pred)^2)  # RMSE or MSE
+}
+
+best_idx <- which.min(errors)
+best_params <- samples2[best_idx, ]
+
+```
+
+```{r}
+y_sim <- simulate_y(best_params["a"], best_params["b"], best_params["c"], best_params["d"], best_params["mu_0"], T)
+
+plot(y, type = 'l', col = "black", lwd = 2, main = "Best Fitting Predictive Simulation")
+
+lines(1:T, y_sim,col = "red", lty = 2, type = 'l')
+
+legend("topright", legend = c("Observed y", "Simulated y (best params)"), col = c("black", "red"), lty = 1:2)
+
+```
+```{r}
+rmse <- sqrt(mean((y - y_sim)^2))
+r2 <- 1 - sum((y - y_sim)^2) / sum((y - mean(y))^2)
+cat(sprintf("The y RMSE is: %.4f\n", rmse))
+cat(sprintf("The y r^2 is: %.4f\n", r2))
+```
+
+```{r}
+
+# Compute y-axis range that includes both observed and simulated
+y_range <- range(c(y, y_sim))
+# Plot with fixed y-axis limits
+plot(1:T, y, type = 'l', col = "black", lwd = 2,
+     main = "Best Fitting Predictive Simulation",
+     ylim = y_range)
+lines(1:T, y_sim, col = "red", lty = 2, lwd = 2)  # no need to specify type again in lines
+legend("topright", legend = c("Observed y", "Simulated y (best params)"), col = c("black", "red"), lty = 1:2)
+
+```
+
+
+Simulate the x values:
+```{r}
+simulate_x <- function(a, b, mu_0, T) {
+  x <- numeric(T)
+  x[1] <- rbinom(1, 1, mu_0)
+  for (i in 2:T) {
+    prob <- x[i - 1] * a + (1 - x[i - 1]) * b
+    x[i] <- rbinom(1, 1, prob)
+  }
+  return(x)
+}
+
+```
+
+run the function and extract the best results
+```{r}
+n <- 100  # number of samples to evaluate
+errors <- numeric(n)
+
+for (i in 1:n) {
+  params <- samples2[i, ]
+  x_sim <- simulate_x(params["a"], params["b"], params["mu_0"], T)
+  errors[i] <- mean((x - x_sim)^2)  # or: 1 - mean(x_true == x_sim)
+}
+
+best_idx <- which.min(errors)
+best_params <- samples2[best_idx, ]
+
+```
+
+
+plot the best prediction
+```{r}
+x_best_sim <- simulate_x(best_params["a"], best_params["b"], best_params["mu_0"], T)
+plot(x, type = 's', col = "black", lwd = 2, main = "Latent State Comparison")
+lines(x_best_sim, col = "blue", lty = 2)
+legend("topright", legend = c("True x", "Simulated x"), col = c("black", "blue"), lty = 1:2)
+```
+
