@@ -1,0 +1,300 @@
+---
+title: "SatPMCMCV2"
+output: html_document
+---
+
+Install
+```{r}
+#install.packages("fastDummies")
+#install.packages("readr")
+```
+
+Load Packages
+```{r}
+library(readr)
+library(fastDummies)
+```
+
+
+```{r}
+# Read in the CSV
+log_data <- read.csv("testLog.csv")
+
+# Number of time steps
+T <- 100
+
+# Extract and format position and velocity matrices (3 x T)
+y_obs <- t(as.matrix(log_data[, c("X..km.", "Y..km.", "Z..km.")]))
+
+v_obs <- t(as.matrix(log_data[, c("VX", "VY", "VZ")]))
+
+# Convert stationkeeping status to binary
+x_obs <- ifelse(log_data$Status == "stationkeeping", 1, 0)
+
+```
+
+
+```{r}
+library(nimble)
+library(nimbleSMC)
+
+#---------------------------------------------------
+# 1. Define the State Space Model in NIMBLE
+#---------------------------------------------------
+ssmCode <- nimbleCode({
+
+  for(d in 1:3) {
+    y[d, 1] ~ dnorm(y_obs[d, 1], 1e-2)
+    v[d, 1] ~ dnorm(v_obs[d, 1], 1e-2)
+  }
+
+  mu_0 ~ dunif(0, 1)
+  x[1] ~ dbern(mu_0)
+
+
+  for(t in 2:T) {
+    # Sample stationkeeping state or use x_obs[t] as data if observed
+    x[t] ~ dbern(x[t-1] * a + (1 - x[t-1]) * b)
+
+    for(d in 1:3) {
+      # No ideal location — just react to current observed drift
+      d_pos <- y_obs[d, t-1] - y[d, t-1]
+      d_vel <- v_obs[d, t-1] - v[d, t-1]
+
+      # Velocity update with PD control if stationkeeping is active
+      v[d, t] <- v[d, t-1] + x[t] * (kp * d_pos + kd * d_vel) * dt + eps_v[d, t]
+      eps_v[d, t] ~ dnorm(0, sigma_v)
+
+      # Position update
+      y[d, t] <- y[d, t-1] + v[d, t-1] * dt
+
+      # Observation models
+      y_obs[d, t] ~ dnorm(y[d, t], obs_sd)
+      v_obs[d, t] ~ dnorm(v[d, t], obs_sd)
+    }
+  }
+
+  # Priors
+  kp ~ dunif(0, 1)
+  kd ~ dunif(0, 1)
+  sigma_v ~ dunif(0, 1)
+  obs_sd ~ dunif(0, 5)
+  a ~ dunif(0, 1)
+  b ~ dunif(0, 1)
+  
+})
+
+
+```
+
+
+
+```{r}
+constants <- list(
+  T = T,
+  dt = 10  # seconds between steps (check your `Time (s)` column spacing)
+)
+
+data <- list(
+  y_obs = y_obs,
+  v_obs = v_obs,
+  x = x_obs
+)
+```
+
+```{r}
+#Finally input your initial estimates for the specified parameters
+inits <- list(
+  y = y_obs,
+  v = v_obs,
+  x = rep(0, ncol(y_obs)),
+  kp = 0.05,
+  kd = 0.05,
+  sigma_v = 0.1,
+  obs_sd = 0.5,
+  a = 0.8,
+  b = 0.2,
+  mu_0 = .05
+)
+
+
+#make list of the parameters
+parameters <- c("y", "v", "x", "kp", "kd", "sigma_v", "obs_sd", "a", "b", "mu_0")
+```
+
+
+```{r}
+#make sure you run the pmcmc function before calling
+samples <- pmcmc(
+  modelCodeInitial = ssmCode,
+  numSteps = T,
+  y_obs = y_obs,
+  v_obs = v_obs,
+  initialList = inits,
+  paramList = parameters,
+  numParticles = 100,
+  numIter = 200
+)
+```
+
+
+
+
+```{r}
+#make sure the simulation function matches
+simulate_satellite_trajectory <- function(T, dt, mu_0, a, b, kp, kd, sigma_v, obs_sd, y0 = rep(0, 3), v0 = rep(0, 3)) {
+  # Initialize
+  x <- numeric(T)
+  x[1] <- rbinom(1, 1, mu_0)
+
+  y <- matrix(NA, nrow = 3, ncol = T)
+  v <- matrix(NA, nrow = 3, ncol = T)
+  y[, 1] <- y0
+  v[, 1] <- v0
+
+  # Storage for noisy observations
+  y_obs <- matrix(NA, nrow = 3, ncol = T)
+  v_obs <- matrix(NA, nrow = 3, ncol = T)
+
+  y_obs[, 1] <- rnorm(3, mean = y[, 1], sd = obs_sd)
+  v_obs[, 1] <- rnorm(3, mean = v[, 1], sd = obs_sd)
+
+  for (t in 2:T) {
+    # Transition latent state x[t]
+    if (is.na(x[t - 1])) {
+      transition_prob <- mu_0  # Fallback to prior mean if undefined
+    } else if (x[t - 1] == 1) {
+      transition_prob <- a
+    } else {
+      transition_prob <- b
+    }
+
+    x[t] <- rbinom(1, 1, transition_prob)
+
+    for (d in 1:3) {
+      # PD control: based on deviation from observed position/velocity at t-1
+      d_pos <- y_obs[d, t - 1] - y[d, t - 1]
+      d_vel <- v_obs[d, t - 1] - v[d, t - 1]
+
+      correction <- x[t] * (kp * d_pos + kd * d_vel)
+      noise <- rnorm(1, 0, sigma_v)
+
+      v[d, t] <- v[d, t - 1] + correction * dt + noise
+      y[d, t] <- y[d, t - 1] + v[d, t - 1] * dt
+    }
+
+    y_obs[, t] <- rnorm(3, mean = y[, t], sd = obs_sd)
+    v_obs[, t] <- rnorm(3, mean = v[, t], sd = obs_sd)
+  }
+
+  return(list(
+    x = x,
+    y = y,
+    v = v,
+    y_obs = y_obs,
+    v_obs = v_obs
+  ))
+}
+
+```
+
+```{r}
+n <- 100  # Number of samples to evaluate
+errors <- numeric(n)
+simulated_x <- list()
+
+for (i in 1:n) {
+  params <- samples[i, ]
+
+  sim <- simulate_satellite_trajectory(
+    T = ncol(y_obs),
+    dt = 10,
+    mu_0 = params["mu_0"],
+    a = params["a"],
+    b = params["b"],
+    kp = params["kp"],
+    kd = params["kd"],
+    sigma_v = params["sigma_v"],
+    obs_sd = params["obs_sd"]
+  )
+
+  x_sim <- sim$x
+  simulated_x[[i]] <- x_sim
+
+  errors[i] <- mean((x_obs - x_sim)^2)  # MSE or 1 - mean(x == x_sim)
+}
+
+# Find best match
+best_idx <- which.min(errors)
+best_params <- samples[best_idx, ]
+x_best_sim <- simulated_x[[best_idx]]
+
+```
+
+
+
+
+```{r}
+plot(x_obs[1:400], type = 's', col = "black", lwd = 2,
+     main = "Latent State Comparison",
+     xlab = "Time Step", ylab = "Stationkeeping (x[t])")
+lines(x_best_sim[1:400], col = "blue", lty = 2)
+legend("topright", legend = c("Observed x", "Simulated x (Best Fit)"),
+       col = c("black", "blue"), lty = 1:2)
+
+```
+
+```{r}
+rmse <- sqrt(mean((x_obs - x_best_sim)^2))
+print(paste("Best RMSE from PMCMC samples:", round(rmse, 4)))
+```
+
+The model for this code:
+```{r}
+pmcmc <- function(modelCodeInitial, numSteps, y_obs, v_obs, initialList, paramList, numParticles, numIter) {
+  
+  constants <- list(
+    T = numSteps,
+    dt = 10  # time step between observations in seconds
+  )
+  
+  data <- list(
+    y_obs = y_obs,
+    v_obs = v_obs
+  )
+  
+  # Build and compile the model
+  model <- nimbleModel(modelCodeInitial, constants = constants, data = data, inits = initialList, check = TRUE)
+  cModel <- compileNimble(model)
+  
+  # Configure PMCMC
+  conf <- configureMCMC(model, nodes = NULL)
+  
+  conf$addSampler(
+    target = paramList,
+    type = "RW_PF_block",
+    control = list(
+      latents = "x",
+      propCov = diag(length(paramList)),
+      pfType = "bootstrap",
+      pfNparticles = numParticles
+    )
+  )
+  
+  conf$addMonitors("x")  # Optionally add "y", "v" for diagnostics
+  
+  # Build and compile MCMC
+  mcmc <- buildMCMC(conf)
+  cmcmc <- compileNimble(mcmc, project = model)
+  
+  # Run PMCMC
+  samples2 <- runMCMC(cmcmc, niter = numIter, nburnin = 20, progressBar = TRUE)
+  
+  return(samples2)
+}
+
+```
+
+
+
+
