@@ -4,3 +4,6 @@ These will simulate fake geostationary satellite data that has noise introduced 
 account for natural drift that occurs in the space. When the satellite reaches a max distance the satellite
 will initiate station keeping to return it to the correct location over earth fixed at some longitude. Once
 back on the correct orbit. The satellite will drop stationkeeping behavior. 
+
+
+We were working on SatPCMCV3 and use the testLog.csv for the satellites
