@@ -43,47 +43,52 @@ library(nimbleSMC)
 #---------------------------------------------------
 ssmCode <- nimbleCode({
 
+  # Initialize latent position and velocity states at t = 1 for each dimension (x, y, z)
+  # These are modeled as Gaussian around the observed values with small variance (1e-2)
   for(d in 1:3) {
-    y[d, 1] ~ dnorm(y_obs[d, 1], 1e-2)
-    v[d, 1] ~ dnorm(v_obs[d, 1], 1e-2)
+    y[d, 1] ~ dnorm(y_obs[d, 1], 1e-2)   # latent position
+    v[d, 1] ~ dnorm(v_obs[d, 1], 1e-2)   # latent velocity
   }
 
+  # Prior for the initial probability of being in station-keeping mode
   mu_0 ~ dunif(0, 1)
-  x[1] ~ dbern(mu_0)
-
-
+  x[1] ~ dbern(mu_0)   # binary latent variable: 1 = station keeping active, 0 = passive
+  # I do not know the ideal position of the satellite as an observer, so mu_0 should serve
+  # as a place holder till we know.
+  
   for(t in 2:T) {
-    # Sample stationkeeping state or use x_obs[t] as data if observed
+    # Latent control state (station keeping) follows a Markov transition process
+    # Probability of staying in same state depends on previous state and transition params a and b
     x[t] ~ dbern(x[t-1] * a + (1 - x[t-1]) * b)
 
     for(d in 1:3) {
-      # No ideal location — just react to current observed drift
-      d_pos <- y_obs[d, t-1] - y[d, t-1]
-      d_vel <- v_obs[d, t-1] - v[d, t-1]
+      # Compute proportional and derivative errors based on the difference 
+      # between observed and latent values (could represent perceived drift)
+      d_pos <- y_obs[d, t-1] - y[d, t-1]  # position error
+      d_vel <- v_obs[d, t-1] - v[d, t-1]  # velocity error
 
-      # Velocity update with PD control if stationkeeping is active
+      # Velocity update equation with PD control when station keeping is active
+      # Adds noise to model random disturbances or unmodeled effects
       v[d, t] <- v[d, t-1] + x[t] * (kp * d_pos + kd * d_vel) * dt + eps_v[d, t]
-      eps_v[d, t] ~ dnorm(0, sigma_v)
+      eps_v[d, t] ~ dnorm(0, sigma_v)  # process noise on velocity
 
-      # Position update
+      # Position update: standard kinematic equation
       y[d, t] <- y[d, t-1] + v[d, t-1] * dt
 
-      # Observation models
+      # Observation models: observed position and velocity are noisy versions of latent states
       y_obs[d, t] ~ dnorm(y[d, t], obs_sd)
       v_obs[d, t] ~ dnorm(v[d, t], obs_sd)
     }
   }
 
-  # Priors
-  kp ~ dunif(0, 1)
-  kd ~ dunif(0, 1)
-  sigma_v ~ dunif(0, 1)
-  obs_sd ~ dunif(0, 5)
-  a ~ dunif(0, 1)
-  b ~ dunif(0, 1)
-  
+  # Priors for PD controller gains, noise scale, observation error, and transition probabilities
+  kp ~ dunif(0, 1)       # proportional gain
+  kd ~ dunif(0, 1)       # derivative gain
+  sigma_v ~ dunif(0, 1)  # standard deviation of velocity noise
+  obs_sd ~ dunif(0, 5)   # observation noise (for both y and v)
+  a ~ dunif(0, 1)        # P(x_t = 1 | x_{t-1} = 1): persistence of station keeping
+  b ~ dunif(0, 1)        # P(x_t = 1 | x_{t-1} = 0): activation of station keeping from drift
 })
-
 
 ```
 
