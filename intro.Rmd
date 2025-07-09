@@ -1,0 +1,90 @@
+---
+title: "intro"
+output: html_document
+---
+```{r}
+#Sys.setenv(DOWNLOAD_STATIC_LIBV8 = 1) # only necessary for Linux without the nodejs library / headers
+#install.packages("rstan", repos = "https://cloud.r-project.org/", dependencies = TRUE)
+```
+
+
+```{r}
+library("rstan") # observe startup messages
+```
+```{r}
+options(mc.cores = parallel::detectCores())
+```
+
+```{r}
+rstan_options(auto_write = TRUE)
+```
+
+
+# Get the satellite data
+```{r}
+library(readr)
+```
+
+```{r}
+# Read in the CSV
+log_data <- read.csv("testLogUpdated.csv")
+
+# Number of time steps
+T <- 2000
+rdt <- 10
+
+# Convert stationkeeping status to binary
+x_obs <- ifelse(log_data$Status == "stationkeeping", 1, 0)
+```
+
+```{r}
+#extract needed data based on this
+sat_data <- list(J = T,
+                  dt = rdt, #the change in time
+                  x = log_data$X..km.[1:T], #the real satellite position in x
+                  y = log_data$Y..km.[1:T], #the real satellite position in y
+                  z = log_data$Z..km.[1:T],  #the real satellite position in z
+                  vx = log_data$VX[1:T], #the real satellite velocity in x
+                  vy = log_data$VY[1:T], #the real satellite velocity in y
+                  vz = log_data$VZ[1:T], #the real satellite velocity in z
+                  ix = log_data$ideal.x[1:T], #ideal position in x
+                  iy = log_data$ideal_y[1:T], # ideal position in y
+                  iz = log_data$ideal_z[1:T], #ideal position in z
+                  ivx = log_data$ideal.VX[1:T], #ideal velocity in x
+                  ivy = log_data$ideal.VY[1:T], #ideal velocity in y
+                  ivz = log_data$ideal.VZ[1:T] #ideal velocity in z
+                  #status = x_obs[1:T] #station keeping or not 0 for not 1 for is
+                  )
+```
+
+```{r}
+print(log_data$X..km.[1:T])
+```
+
+
+```{r}
+fit <- stan(file = 'introStan.stan', data = sat_data)
+#init = function() list(md = 100, kp = -0.001, kd = -0.005, sigmaY = 1, sigmaV = 1)
+```
+
+```{r}
+head(sat_data$t[100])
+```
+
+```{r}
+print(fit)
+plot(fit)
+pairs(fit, pars = c("md", "kp", "kd", "sigmaY", "sigmaV"))
+
+la <- extract(fit, permuted = TRUE) # return a list of arrays 
+md <- la$md 
+
+### return an array of three dimensions: iterations, chains, parameters 
+a <- extract(fit, permuted = FALSE) 
+
+### use S3 functions on stanfit objects
+a2 <- as.array(fit)
+m <- as.matrix(fit)
+d <- as.data.frame(fit)
+```
+
