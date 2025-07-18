@@ -5,5 +5,7 @@ account for natural drift that occurs in the space. When the satellite reaches a
 will initiate station keeping to return it to the correct location over earth fixed at some longitude. Once
 back on the correct orbit. The satellite will drop stationkeeping behavior. 
 
+latV1.rmd infers the longitude location of geo orbit
+
 We are now using the updated testLogUpdated.csv for satellites that include the ideal position and location.
 
