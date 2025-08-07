@@ -9,3 +9,5 @@ latV1.rmd infers the longitude location of geo orbit
 
 We are now using the updated testLogUpdated.csv for satellites that include the ideal position and location.
 
+
+Orbit14.py and j2TestLog.csv This is the initial orbit now with the effects of j2, solar radiation, and central gravity effects
