@@ -5,6 +5,8 @@ from mpl_toolkits.mplot3d import Axes3D
 #correctlty implements the drifting of satellite 
 # accounts for drift in the velocity variable
 
+#This is the initial orbit now with the effects of j2, solar radiation, and central gravity effects
+
 #/opt/anaconda3/envs/cleanorbit/bin/python "/Users/emmafinch/Desktop/Thesis/Python Code/orbit14.py"
 class Satellite:
     # Satellite class simulates orbital propagation with optional stationkeeping
@@ -281,7 +283,7 @@ sat = Satellite(
 
 sat.propagate(duration=86400)
 df = sat.get_log()
-df.to_csv("testLogUpdated.csv", index=False)
+df.to_csv("j2TestLog.csv", index=False)
 
 plot2d(df)
 plot3d(df)
