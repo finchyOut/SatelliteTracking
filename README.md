@@ -13,3 +13,5 @@ We are now using the updated testLogUpdated.csv for satellites that include the 
 Orbit14.py and j2TestLog.csv This is the initial orbit now with the effects of j2, solar radiation, and central gravity effects
 
 The most up to date python sim is mainRun, orbits, and plotOrbits
+### Newest Additions
+For the code related to how the convex controller runs use the convex labeled convexMainRun. convexOrbitsV4, and convexPlots. Note the most up to date convex controller is currently on the google colab. For code related to the kp kd controller use the mainRun.py, orbitPlots.py, and orbits.py. The most up to date stan files are the pdControllerV2.rmd and the pdControllerV3.stan. 
