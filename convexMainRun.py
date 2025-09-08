@@ -1,8 +1,8 @@
-from orbits import Satellite, Sun, Moon
-from orbitPlots import plot_paths_xy, plot_paths_3d, plot2d, plot3d, EARTH_RADIUS_KM
+from convexOrbitsV4 import Satellite, Sun, Moon
+from convexPlots import plot_paths_xy, plot_paths_3d, plot2d, plot3d, EARTH_RADIUS_KM
 #how to call: 
 #/opt/anaconda3/envs/cleanorbit/bin/python "/Users/emmafinch/Desktop/Thesis/Python Code/simModel/mainRun.py"
-
+#/opt/anaconda3/envs/cleanorbit/bin/python "/Users/emmafinch/Desktop/Thesis/Python Code/convexController /convexMainRun.py"
 
 #Create bodies with perfect circular orbits
 #the phase just determines where it starts in its loop
@@ -17,17 +17,21 @@ moon = Moon(phase_deg=45.0)
 #moon.propagate(duration=24*3600)   # simulate 1 day of Moon positions (optional)
 
 # Satellite with third-body effects enabled
+timeStep = 30
 sat = Satellite(
     sat_id='01',
     longitude_deg=45,
-    noise_std=0.08,
-    max_drift_km=1000,
-    time_step=10,
-    bodies=[sun, moon]   # <-- enable Sun+Moon gravity
+    max_drift_km=36,
+    time_step=timeStep, #somewhere 20-70
+    noise_std= 1e-8 * .5* timeStep**2,
+    bodies=[sun, moon],   # <-- enable Sun+Moon gravity
+    gamma_km=36,   # allowed box radius around target per axis (km)
+    H_steps=1,      # apply control every 10 steps (here, every 10*60 = 600 s)
+    a_max=1e200
 )
 
-
-sat.propagate(duration=86400 ) #propagates for one day aka one loop.
+totalProp = 86400 *30 # 1 day times 15 days
+sat.propagate(duration=totalProp ) #propagates for one day aka one loop.
 df = sat.get_log()
 df.to_csv("simModel/simLog.csv", index=False)
 
