@@ -1,6 +1,6 @@
 import numpy as np
 import jax
-jax.config.update("jax_enable_x64", True)
+# jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 from scipy.integrate import solve_ivp
 import numpyro
@@ -28,12 +28,12 @@ def jax_control_policy(s, s_ref, Kp, Kd, gamma):
     return thrust
 
 def jax_central_gravity(r):
-    return -const.MU_EARTH / jnp.linalg.norm(r)**3 * r
+    return -const.MU_EARTH_KM / jnp.linalg.norm(r)**3 * r
 
 def jax_j2_perturbation(r):
     x, y, z = r
     r_norm = jnp.linalg.norm(r)
-    pre_factor = -1.5 * const.J2 * const.MU_EARTH * const.R_EARTH**2 / r_norm**5
+    pre_factor = -1.5 * const.J2 * const.MU_EARTH_KM * const.R_EARTH_KM**2 / r_norm**5
     z_factor = 5 * z**2 / r_norm**2
     ax = pre_factor * x * (1 - z_factor)
     ay = pre_factor * y * (1 - z_factor)
@@ -45,16 +45,16 @@ def jax_third_body_perturbation(r, k, sun_pos, moon_pos):
     r_moon = moon_pos[k]
     
     r_sat_sun = r_sun - r
-    a_sun = const.MU_SUN * (r_sat_sun / jnp.linalg.norm(r_sat_sun)**3 - r_sun / jnp.linalg.norm(r_sun)**3)
+    a_sun = const.MU_SUN_KM * (r_sat_sun / jnp.linalg.norm(r_sat_sun)**3 - r_sun / jnp.linalg.norm(r_sun)**3)
     r_sat_moon = r_moon - r
-    a_moon = const.MU_MOON * (r_sat_moon / jnp.linalg.norm(r_sat_moon)**3 - r_moon / jnp.linalg.norm(r_moon)**3)
+    a_moon = const.MU_MOON_KM * (r_sat_moon / jnp.linalg.norm(r_sat_moon)**3 - r_moon / jnp.linalg.norm(r_moon)**3)
     return a_sun + a_moon
 
 def jax_srp_perturbation(r, k, sat_params, sun_pos):
     C_R, A, m = sat_params['C_R'], sat_params['A'], sat_params['m']
     r_sun = sun_pos[k]
     r_sat_sun = r_sun - r
-    return -const.P_R * C_R * A / m * (r_sat_sun / jnp.linalg.norm(r_sat_sun))
+    return -const.P_R_KM_COEFF * C_R * A / m * (r_sat_sun / jnp.linalg.norm(r_sat_sun))
 
 def jax_get_total_acceleration(s, s_ref, k, sun_pos, moon_pos, sat_params, policy_params):
     r = s[:3]
@@ -73,7 +73,7 @@ def jax_get_total_acceleration(s, s_ref, k, sun_pos, moon_pos, sat_params, polic
 def generate_reference_trajectory(s0: np.ndarray, t_span: tuple, dt: float) -> tuple:
     def keplerian_rhs(t, s):
         r, v = s[:3], s[3:]
-        a = -const.MU_EARTH / np.linalg.norm(r)**3 * r
+        a = -const.MU_EARTH_KM / np.linalg.norm(r)**3 * r
         return np.hstack([v, a])
     
     times = np.arange(t_span[0], t_span[1], dt)
@@ -86,16 +86,16 @@ def sde_model(times, observed_states, ref_states, sun_pos, moon_pos, sat_params)
 
     logKp  = numpyro.sample("logKp",  dist.Normal(jnp.log(5e-4), 1.0)) 
     logKd  = numpyro.sample("logKd",  dist.Normal(jnp.log(5e-1), 0.5))
-    logGam = numpyro.sample("logGam", dist.Normal(jnp.log(5e3), 0.3))
+    logGam = numpyro.sample("logGam", dist.Normal(jnp.log(10), 10.0))
     Kp     = numpyro.deterministic("Kp", jnp.exp(logKp))
     Kd     = numpyro.deterministic("Kd", jnp.exp(logKd))
     gamma  = numpyro.deterministic("gamma", jnp.exp(logGam))
     # sigma  = numpyro.sample("sigma", dist.LogNormal(jnp.log(0.1), 2.0))
 
-    sigma = 1e-4
-    # Kp = 5e-4
+    sigma = 1e-3
+    # Kp = 5e-2
     # Kd = 5e-1
-    # gamma = 5000
+    # gamma = 5
 
 
     policy_params = {"Kp": Kp, "Kd": Kd, "gamma": gamma}
@@ -144,11 +144,11 @@ def run_bayesian_inference():
     # These are our "true" parameters that we'll try to recover
     true_satellite_params = {'C_R': 1.5, 'A': 20.0, 'm': 1000.0}
     true_policy_params = {
-        'gamma': 5000.0,
-        'Kp': 5e-4,
+        'gamma': 5.0,
+        'Kp': 5e-2,
         'Kd': 5e-1
     }
-    true_sigma = 1e-4
+    true_sigma = 1e-3
 
     # Generate the data
     simulator = OrbitSimulator(
@@ -156,9 +156,9 @@ def run_bayesian_inference():
         policy_params=true_policy_params,
         sigma=true_sigma
     )
-    ref_times, ref_states = generate_reference_trajectory(const.S0, t_span, dt)
+    ref_times, ref_states = generate_reference_trajectory(const.S0_KM, t_span, dt)
     
-    sim_times, sim_states, _ = simulator.simulate_SLV(const.S0, t_span, dt, ref_states)
+    sim_times, sim_states, _ = simulator.simulate_SLV(const.S0_KM, t_span, dt, ref_states)
 
     print("Data generation complete.")
     
@@ -166,8 +166,8 @@ def run_bayesian_inference():
     observed_states = jnp.array(sim_states)
     times = jnp.array(sim_times)
     ref_states = jnp.array(ref_states)
-    sun_pos = jnp.array(simulator.sun_pos_m.T)
-    moon_pos = jnp.array(simulator.moon_pos_m.T)
+    sun_pos = jnp.array(simulator.sun_pos_km.T)
+    moon_pos = jnp.array(simulator.moon_pos_km.T)
 
     print("\n--- 2. Running Bayesian Inference with NumPyro ---")
     rng_key = jax.random.PRNGKey(0)

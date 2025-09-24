@@ -27,20 +27,20 @@ class OrbitSimulator:
     def precompute_ephemeris(self, times: np.ndarray):
         """Pre-computes Sun and Moon positions for the simulation duration."""
         sky_times = self.ts.utc(2025, 1, 1, 0, 0, times)
-        
-        self.sun_pos_m = self.sun.at(sky_times).position.m - self.earth.at(sky_times).position.m
-        self.moon_pos_m = self.moon.at(sky_times).position.m - self.earth.at(sky_times).position.m
+
+        self.sun_pos_km = (self.sun.at(sky_times).position.m - self.earth.at(sky_times).position.m) / 1000
+        self.moon_pos_km = (self.moon.at(sky_times).position.m - self.earth.at(sky_times).position.m) / 1000
 
 
     # --- Core Force Models ---
 
     def _central_gravity(self, r: np.ndarray) -> np.ndarray:
-        return -const.MU_EARTH / np.linalg.norm(r)**3 * r
+        return -const.MU_EARTH_KM / np.linalg.norm(r)**3 * r
 
     def _j2_perturbation(self, r: np.ndarray) -> np.ndarray:
         x, y, z = r
         r_norm = np.linalg.norm(r)
-        pre_factor = -1.5 * const.J2 * const.MU_EARTH * const.R_EARTH**2 / r_norm**5
+        pre_factor = -1.5 * const.J2 * const.MU_EARTH_KM * const.R_EARTH_KM**2 / r_norm**5
         z_factor = 5 * z**2 / r_norm**2
         ax = pre_factor * x * (1 - z_factor)
         ay = pre_factor * y * (1 - z_factor)
@@ -48,20 +48,20 @@ class OrbitSimulator:
         return np.array([ax, ay, az])
 
     def _third_body_perturbation(self, r: np.ndarray, k: int) -> np.ndarray:
-        r_sun = self.sun_pos_m[:, k]
-        r_moon = self.moon_pos_m[:, k]
-        
+        r_sun = self.sun_pos_km[:, k]
+        r_moon = self.moon_pos_km[:, k]
+
         r_sat_sun = r_sun - r
-        a_sun = const.MU_SUN * (r_sat_sun / np.linalg.norm(r_sat_sun)**3 - r_sun / np.linalg.norm(r_sun)**3)
+        a_sun = const.MU_SUN_KM * (r_sat_sun / np.linalg.norm(r_sat_sun)**3 - r_sun / np.linalg.norm(r_sun)**3)
         r_sat_moon = r_moon - r
-        a_moon = const.MU_MOON * (r_sat_moon / np.linalg.norm(r_sat_moon)**3 - r_moon / np.linalg.norm(r_moon)**3)
+        a_moon = const.MU_MOON_KM * (r_sat_moon / np.linalg.norm(r_sat_moon)**3 - r_moon / np.linalg.norm(r_moon)**3)
         return a_sun + a_moon
 
     def _srp_perturbation(self, r: np.ndarray, k: int) -> np.ndarray:
         C_R, A, m = self.satellite_params['C_R'], self.satellite_params['A'], self.satellite_params['m']
-        r_sun = self.sun_pos_m[:, k]
+        r_sun = self.sun_pos_km[:, k]
         r_sat_sun = r_sun - r
-        return -const.P_R * C_R * A / m * (r_sat_sun / np.linalg.norm(r_sat_sun))
+        return -const.P_R_KM_COEFF * C_R * A / m * (r_sat_sun / np.linalg.norm(r_sat_sun))
 
     # PD Control Policy with Deadband
     def _control_policy(self, s: np.ndarray, s_ref: np.ndarray) -> np.ndarray:
@@ -224,18 +224,18 @@ class OrbitSimulator:
             "Time (s)": t,
             "Satellite ID": "Geosat-1",  # Placeholder, could be a class attribute
             "Longitude (deg)": longitude_deg,
-            "X (m)": r_sim[0],
-            "Y (m)": r_sim[1],
-            "Z (m)": r_sim[2],
-            "VX (m/s)": v_sim[0],
-            "VY (m/s)": v_sim[1],
-            "VZ (m/s)": v_sim[2],
-            "ideal X (m)": r_ref[0],
-            "ideal Y (m)": r_ref[1],
-            "ideal Z (m)": r_ref[2],
-            "ideal VX (m/s)": v_ref[0],
-            "ideal VY (m/s)": v_ref[1],
-            "ideal VZ (m/s)": v_ref[2],
+            "X (km)": r_sim[0],
+            "Y (km)": r_sim[1],
+            "Z (km)": r_sim[2],
+            "VX (km/s)": v_sim[0],
+            "VY (km/s)": v_sim[1],
+            "VZ (km/s)": v_sim[2],
+            "ideal X (km)": r_ref[0],
+            "ideal Y (km)": r_ref[1],
+            "ideal Z (km)": r_ref[2],
+            "ideal VX (km/s)": v_ref[0],
+            "ideal VY (km/s)": v_ref[1],
+            "ideal VZ (km/s)": v_ref[2],
             "Status": status,
             "Control Accel (X)": control_accel[0],
             "Control Accel (Y)": control_accel[1],
