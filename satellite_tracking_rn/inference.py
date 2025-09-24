@@ -90,8 +90,9 @@ def sde_model(times, observed_states, ref_states, sun_pos, moon_pos, sat_params)
     Kp     = numpyro.deterministic("Kp", jnp.exp(logKp))
     Kd     = numpyro.deterministic("Kd", jnp.exp(logKd))
     gamma  = numpyro.deterministic("gamma", jnp.exp(logGam))
-    sigma  = numpyro.sample("sigma", dist.LogNormal(jnp.log(0.1), 2.0))
+    # sigma  = numpyro.sample("sigma", dist.LogNormal(jnp.log(0.1), 2.0))
 
+    sigma = 1e-4
     # Kp = 5e-4
     # Kd = 5e-1
     # gamma = 5000
