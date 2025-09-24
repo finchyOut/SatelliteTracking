@@ -70,19 +70,14 @@ def jax_get_total_acceleration(s, s_ref, k, sun_pos, moon_pos, sat_params, polic
 
 # --- 2. DATA GENERATION ---
 def generate_reference_trajectory(s0: np.ndarray, t_span: tuple, dt: float) -> tuple:
-
-    s0 = np.linalg.norm(s0)
-    w = np.sqrt(const.MU_EARTH / s0**3)
-    t_range = np.arange(t_span[0], t_span[1], dt)
-
-    x = s0 * np.cos(w * t_range)
-    y = s0 * np.sin(w * t_range)
-    vx = -s0 * w * np.sin(w * t_range)
-    vy = s0 * w * np.cos(w * t_range)
-
-    results = np.column_stack([x, y, np.zeros_like(x), vx, vy, np.zeros_like(x)])
-
-    return t_range, results
+    def keplerian_rhs(t, s):
+        r, v = s[:3], s[3:]
+        a = -const.MU_EARTH / np.linalg.norm(r)**3 * r
+        return np.hstack([v, a])
+    
+    times = np.arange(t_span[0], t_span[1], dt)
+    sol = solve_ivp(fun=keplerian_rhs, t_span=t_span, y0=s0, t_eval=times, rtol=1e-9, atol=1e-12)
+    return sol.t, sol.y.T
 
 
 # --- 3. NUMPYRO BAYESIAN INFERENCE MODEL ---
@@ -131,8 +126,8 @@ def sde_model(times, observed_states, ref_states, sun_pos, moon_pos, sat_params)
 # --- 4. EXECUTION ---
 def run_bayesian_inference():
     print("--- 1. Generating Ground Truth Data ---")
-    duration_days = 2.0
-    dt = 1.0 
+    duration_days = 1.0
+    dt = 2.0 
     t_span = (0, duration_days * 24 * 3600)
 
     # These are our "true" parameters that we'll try to recover
