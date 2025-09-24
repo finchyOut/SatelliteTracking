@@ -72,9 +72,9 @@ class OrbitSimulator:
         gamma = self.policy_params.get('gamma', 0)
         Kp = self.policy_params.get('Kp', 0)
         Kd = self.policy_params.get('Kd', 0)
-        
-        delta_r = s_ref[:3] - s[:3]  
-        delta_v = s_ref[3:] - s[3:]
+
+        delta_r = s[:3] - s_ref[:3]
+        delta_v = s[3:] - s_ref[3:]
 
         # Check if the satellite is outside the deadband radius
         position_error_norm = np.linalg.norm(delta_r)
@@ -153,6 +153,8 @@ class OrbitSimulator:
             
             # Log the state after the step
             self._log_state(k+1, times[k+1], states[k+1], ref_trajectory[k+1], a_policy)
+
+        return times, states, control_actions
             
 
     def simulate(self, s0: np.ndarray, t_span: tuple, dt: float, ref_trajectory: np.ndarray) -> tuple:
@@ -198,6 +200,8 @@ class OrbitSimulator:
 
             # Log the state after the step
             self._log_state(k+1, times[k+1], states[k+1], ref_trajectory[k+1], a_policy)
+
+        return times, states, control_actions
             
     
     def _log_state(self, k: int, t: float, sim_state: np.ndarray, ref_state: np.ndarray, control_accel: np.ndarray):
