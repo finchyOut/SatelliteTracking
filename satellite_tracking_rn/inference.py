@@ -1,6 +1,7 @@
 import numpy as np
-import jax.numpy as jnp
 import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp
 from scipy.integrate import solve_ivp
 import numpyro
 import numpyro.distributions as dist
@@ -82,10 +83,19 @@ def generate_reference_trajectory(s0: np.ndarray, t_span: tuple, dt: float) -> t
 
 # --- 3. NUMPYRO BAYESIAN INFERENCE MODEL ---
 def sde_model(times, observed_states, ref_states, sun_pos, moon_pos, sat_params):
-    Kp = numpyro.sample("Kp", dist.Uniform(0.0, 1.0))
-    Kd = numpyro.sample("Kd", dist.Uniform(0.0, 1.0))
-    gamma = numpyro.sample("gamma", dist.Uniform(1000.0, 10000.0))
-    sigma = 1e-4 # numpyro.sample("sigma", dist.LogNormal(jnp.log(1e-8), 0.1))
+
+    logKp  = numpyro.sample("logKp",  dist.Normal(jnp.log(5e-4), 1.0)) 
+    logKd  = numpyro.sample("logKd",  dist.Normal(jnp.log(5e-1), 0.5))
+    logGam = numpyro.sample("logGam", dist.Normal(jnp.log(5e3), 0.3))
+    Kp     = numpyro.deterministic("Kp", jnp.exp(logKp))
+    Kd     = numpyro.deterministic("Kd", jnp.exp(logKd))
+    gamma  = numpyro.deterministic("gamma", jnp.exp(logGam))
+    sigma  = numpyro.sample("sigma", dist.LogNormal(jnp.log(0.1), 2.0))
+
+    # Kp = 5e-4
+    # Kd = 5e-1
+    # gamma = 5000
+
 
     policy_params = {"Kp": Kp, "Kd": Kd, "gamma": gamma}
 
@@ -127,7 +137,7 @@ def sde_model(times, observed_states, ref_states, sun_pos, moon_pos, sat_params)
 def run_bayesian_inference():
     print("--- 1. Generating Ground Truth Data ---")
     duration_days = 1.0
-    dt = 2.0 
+    dt = 1.0 
     t_span = (0, duration_days * 24 * 3600)
 
     # These are our "true" parameters that we'll try to recover
