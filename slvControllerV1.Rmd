@@ -1,0 +1,272 @@
+---
+title: "slvControllerV1"
+output: html_document
+---
+
+```{r}
+#Sys.setenv(DOWNLOAD_STATIC_LIBV8 = 1) # only necessary for Linux without the nodejs library / headers
+#install.packages("rstan", repos = "https://cloud.r-project.org/", dependencies = TRUE)
+```
+
+
+```{r}
+library("rstan") # observe startup messages
+```
+```{r}
+options(mc.cores = parallel::detectCores())
+```
+
+```{r}
+rstan_options(auto_write = TRUE)
+```
+
+
+# Get the satellite data
+```{r}
+library(readr)
+```
+
+```{r}
+# Read in the CSV
+sat_data <- read.csv("30DaySimData/pdSim.csv")
+refTrajectory <- read.csv("30DaySimData/reference_trajectory.csv")
+moonSunLog <- read.csv('30DaySimData/moonAndSunSim.csv')
+
+# Number of time steps
+# Convert stationkeeping status to binary
+#x_obs <- ifelse(log_data$Status == "stationkeeping", 1, 0)
+```
+
+```{r}
+T <- 20000
+rdt <- 120
+q <- T*2
+keep_idx <-which(sat_data$Time..s. %% rdt==0)
+newTrimmedData <- sat_data[keep_idx, ]
+```
+
+
+```{r}
+#extract needed data based on this
+run_data <- list(J = T,
+                 Q = q,
+                  dt = rdt, #the change in time
+                  x = newTrimmedData$X..m.[1:T], #the real satellite position in x
+                  y = newTrimmedData$Y..m.[1:T], #the real satellite position in y
+                  z = newTrimmedData$Z..m.[1:T],  #the real satellite position in z
+                  vx = newTrimmedData$VX..m.s.[1:T], #the real satellite velocity in x
+                  vy = newTrimmedData$VY..m.s.[1:T], #the real satellite velocity in y
+                  vz = newTrimmedData$VZ..m.s.[1:T], #the real satellite velocity in z
+                  ix = refTrajectory$x[1:q], #ideal position in x
+                  iy = refTrajectory$y[1:q], # ideal position in y
+                  iz = refTrajectory$z[1:q], #ideal position in z
+                  ivx = refTrajectory$vx[1:q], #ideal velocity in x
+                  ivy = refTrajectory$vy[1:q], #ideal velocity in y
+                  ivz = refTrajectory$vz[1:q], #ideal velocity in z
+                  moonX = moonSunLog$Moon.X..m.[1:T], # moon x position 
+                  moonY = moonSunLog$Moon.Y..m.[1:T], # moon y position 
+                  moonZ = moonSunLog$Moon.Z..m.[1:T], # moon z position 
+                  sunX = moonSunLog$Sun.X..m.[1:T], # sun x position 
+                  sunY = moonSunLog$Sun.Y..m.[1:T], # sun y position 
+                  sunZ = moonSunLog$Sun.Z..m.[1:T] # sun z position 
+                  #status = x_obs[1:T] #station keeping or not 0 for not 1 for is
+                  )
+```
+
+```{r}
+#print(log_data$X..km.[1:T])
+```
+
+
+```{r}
+#control = list(adapt_delta = 0.75)
+#the best fit so far had a warmup of 100, and 3000 iterations
+fit30Known <- stan(file = 'pdControllerSLVV3.stan', data = run_data, warmup = 100, iter = 3000)
+#init = function() list(md = 100, kp = -0.001, kd = -0.005, sigmaY = 1, sigmaV = 1)
+```
+
+```{r}
+head(sat_data$t[100])
+```
+
+```{r}
+print(fit)
+plot(fit)
+pairs(fit, pars = c("md", "kp", "kd", "sigmaV"))
+
+la <- extract(fit, permuted = TRUE) # return a list of arrays 
+md <- la$md 
+
+### return an array of three dimensions: iterations, chains, parameters 
+a <- extract(fit, permuted = FALSE) 
+
+### use S3 functions on stanfit objects
+a2 <- as.array(fit)
+m <- as.matrix(fit)
+d <- as.data.frame(fit)
+```
+
+```{r}
+#install.packages("shinystan")
+```
+
+```{r}
+library(shinystan)
+```
+
+```{r}
+launch_shinystan(fit30Known)
+```
+
+Plots prior vs posterior vs truth below
+```{r}
+library(bayesplot)
+```
+
+```{r}
+posterior_array <- as.array(fit)
+mcmc_trace(posterior_array, pars = c("md", "kp", "kd", "sigmaV"))
+```
+
+
+
+```{r}
+library(ggplot2)
+
+# Posterior samples
+posterior_samples <- extract(fit)$md
+df_post <- data.frame(md = posterior_samples)
+
+ggplot(df_post, aes(x = md)) +
+  # Prior box (fill legend)
+  geom_rect(aes(xmin = 800, xmax = 1100, ymin = 0, ymax = 0.02, fill = "Prior (Uniform)"), 
+            alpha = 0.3, inherit.aes = FALSE) +
+  
+  # Posterior histogram (fill legend)
+  geom_histogram(aes(y = ..density.., fill = "Posterior"), 
+                 bins = 50, alpha = 0.7, color = "grey") +
+  
+  # True value line (color legend)
+  geom_vline(aes(xintercept = 1000, color = "True Value"), 
+             linetype = "dotdash", size = 1.2) +
+  
+  # Separate fill legend
+  scale_fill_manual(name = "Distribution", 
+                    values = c("Prior (Uniform)" = "lightgrey", 
+                               "Posterior" = "skyblue")) +
+  
+  # Separate color legend
+  scale_color_manual(name = "Reference", 
+                     values = c("True Value" = "darkgreen")) +
+  
+  # Override legend aesthetics cleanly
+  guides(
+    fill = guide_legend(override.aes = list(linetype = 0, color = NA)),
+    color = guide_legend(override.aes = list(fill = NA))
+  ) +
+  
+  coord_cartesian(xlim = c(750, 1150)) +
+  labs(x = "md", y = "Density") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  labs(title = "Prior vs Posterior vs Truth Plot for md",
+  x = "md",
+  y = "Density"
+)
+
+```
+
+```{r}
+library(ggplot2)
+
+# Posterior samples
+posterior_samples <- extract(fit)$kp
+df_post <- data.frame(md = posterior_samples)
+
+ggplot(df_post, aes(x = md)) +
+  # Prior box (fill legend)
+  geom_rect(aes(xmin =-.006, xmax = .006, ymin = 0, ymax = 1000, fill = "Prior (Uniform)"), 
+            alpha = 0.3, inherit.aes = FALSE) +
+  
+  # Posterior histogram (fill legend)
+  geom_histogram(aes(y = ..density.., fill = "Posterior"), 
+                 bins = 50, alpha = 0.7, color = "grey") +
+  
+  # True value line (color legend)
+  geom_vline(aes(xintercept = .00001, color = "True Value"), 
+             linetype = "dotdash", size = 1.2) +
+  
+  # Separate fill legend
+  scale_fill_manual(name = "Distribution", 
+                    values = c("Prior (Uniform)" = "lightgrey", 
+                               "Posterior" = "skyblue")) +
+  
+  # Separate color legend
+  scale_color_manual(name = "Reference", 
+                     values = c("True Value" = "darkgreen")) +
+  
+  # Override legend aesthetics cleanly
+  guides(
+    fill = guide_legend(override.aes = list(linetype = 0, color = NA)),
+    color = guide_legend(override.aes = list(fill = NA))
+  ) +
+  
+  coord_cartesian(xlim = c(-0.007, 0.007)) +
+  labs(x = "kp", y = "Density") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  labs(title = "Prior vs Posterior vs Truth Plot for kp",
+  x = "kp",
+  y = "Density"
+)
+
+```
+
+```{r}
+library(ggplot2)
+
+# Posterior samples
+posterior_samples <- extract(fit)$kd
+df_post <- data.frame(md = posterior_samples)
+
+ggplot(df_post, aes(x = md)) +
+  # Prior box (fill legend)
+  geom_rect(aes(xmin =-.006, xmax = .006, ymin = 0, ymax = 200, fill = "Prior (Uniform)"), 
+            alpha = 0.3, inherit.aes = FALSE) +
+  
+  # Posterior histogram (fill legend)
+  geom_histogram(aes(y = ..density.., fill = "Posterior"), 
+                 bins = 50, alpha = 0.7, color = "grey") +
+  
+  # True value line (color legend)
+  geom_vline(aes(xintercept = .0002, color = "True Value"), 
+             linetype = "dotdash", size = 1.2) +
+  
+  # Separate fill legend
+  scale_fill_manual(name = "Distribution", 
+                    values = c("Prior (Uniform)" = "lightgrey", 
+                               "Posterior" = "skyblue")) +
+  
+  # Separate color legend
+  scale_color_manual(name = "Reference", 
+                     values = c("True Value" = "darkgreen")) +
+  
+  # Override legend aesthetics cleanly
+  guides(
+    fill = guide_legend(override.aes = list(linetype = 0, color = NA)),
+    color = guide_legend(override.aes = list(fill = NA))
+  ) +
+  
+  coord_cartesian(xlim = c(-0.007, 0.007)) +
+  labs(x = "kd", y = "Density") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  labs(title = "Prior vs Posterior vs Truth Plot for kd",
+  x = "kd",
+  y = "Density"
+)
+
+```
+
+
+
