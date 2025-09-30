@@ -3,3 +3,4 @@ This is a way to track my thesis progress work. These are the files you should u
 
 ### R stan code 
 The most up to date stan files are the pdControllerV2.rmd and the pdControllerV3.stan. 
+The updated stan code for the SLV simulation. The pdControllerSLVV2.stan, and slvControllerV1.Rmd.
