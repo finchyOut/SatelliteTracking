@@ -1,0 +1,164 @@
+---
+title: "slvControllerV1"
+output: html_document
+---
+
+```{r}
+#Sys.setenv(DOWNLOAD_STATIC_LIBV8 = 1) # only necessary for Linux without the nodejs library / headers
+#install.packages("rstan", repos = "https://cloud.r-project.org/", dependencies = TRUE)
+```
+
+
+```{r}
+library("rstan") # observe startup messages
+```
+```{r}
+#this just enables parallelization
+options(mc.cores = parallel::detectCores())
+```
+
+```{r}
+rstan_options(auto_write = TRUE)
+```
+
+
+# Get the satellite data
+```{r}
+library(readr)
+```
+
+```{r}
+# Read in the CSV -- WNC: Updated directory for my PC
+setwd('C:/Users/cabal/SatSimData')
+#sat_data <- read.csv("pdSimOneDay.csv")
+#refTrajectory <- read.csv("reference_trajectoryOneDay.csv")
+#moonSunLog <- read.csv('moonAndSunSimOneDay.csv')
+
+sat_data <- read.csv("28Day360dt_5e-8kp_1e-6_kp_5000MD_Sat_sigma1E-7_sqrtdt.csv")
+refTrajectory <- read.csv("28Day360dt_5e-8kp_1e-6_kp_5000MD_reforbit_sigma1E-7_sqrtdt.csv")
+moonSunLog <- read.csv('28Day360dt_5e-8kp_1e-6_kp_5000MD_moonAndSunSim_sigma1E-7_sqrtdt.csv')
+
+# Number of time steps
+# Convert stationkeeping status to binary
+#x_obs <- ifelse(log_data$Status == "stationkeeping", 1, 0)
+```
+
+```{r}
+rdt <- 300 # this is how much time between each data point
+T <- 3*24*3600/rdt # this is how many data entries you want to learn from
+q <- T*2 #this is how many data entries you need for the reference trajectory
+keep_idxSat <-which(sat_data$Time..s. %% rdt==0)
+keep_idxRef <-which(refTrajectory$t %% (rdt/2)==0)
+newTrimmedSatData <- sat_data[keep_idxSat, ]
+newTrimmedMoonData <- moonSunLog[keep_idxSat, ]
+newTrimmedRefData <- refTrajectory[keep_idxRef, ]
+```
+
+
+```{r}
+#extract needed data based on this
+run_data <- list(J = as.integer(T),
+                 Q = as.integer(q),
+                  dt = rdt, #the change in time
+                  x = newTrimmedSatData$X..m.[1:T], #the real satellite position in x
+                  y = newTrimmedSatData$Y..m.[1:T], #the real satellite position in y
+                  z = newTrimmedSatData$Z..m.[1:T],  #the real satellite position in z
+                  vx = newTrimmedSatData$VX..m.s.[1:T], #the real satellite velocity x
+                  vy = newTrimmedSatData$VY..m.s.[1:T], #the real satellite velocity y
+                  vz = newTrimmedSatData$VZ..m.s.[1:T], #the real satellite velocity z
+                  ix = newTrimmedRefData$x[1:q], #ideal position in x
+                  iy = newTrimmedRefData$y[1:q], # ideal position in y
+                  iz = newTrimmedRefData$z[1:q], #ideal position in z
+                  ivx = newTrimmedRefData$vx[1:q], #ideal velocity in x
+                  ivy = newTrimmedRefData$vy[1:q], #ideal velocity in y
+                  ivz = newTrimmedRefData$vz[1:q], #ideal velocity in z
+                  moonX = newTrimmedMoonData$Moon.X..m.[1:T], # moon x position 
+                  moonY = newTrimmedMoonData$Moon.Y..m.[1:T], # moon y position 
+                  moonZ = newTrimmedMoonData$Moon.Z..m.[1:T], # moon z position 
+                  sunX = newTrimmedMoonData$Sun.X..m.[1:T], # sun x position 
+                  sunY = newTrimmedMoonData$Sun.Y..m.[1:T], # sun y position 
+                  sunZ = newTrimmedMoonData$Sun.Z..m.[1:T] # sun z position 
+                  #status = x_obs[1:T] #station keeping or not 0 for not 1 for is
+                  )
+```
+
+```{r}
+#print(log_data$X..km.[1:T])
+```
+
+
+```{r}
+#control = list(adapt_delta = 0.75)
+#the best fit so far had a warmup of 100, and 3000 iterations
+#init_vals = list(logmd = 3.5, logkp =-8, logkd = -6)
+adjustedDatafit <- stan(file = 'pdControllerSLVV3_mod5.stan', data = run_data, warmup = 100, iter = 4000, control = list(adapt_delta = 0.9), chains=2) #adaptdelta=0.9 gave good convergence but many divergences
+#init = function() list(md = 100, kp = -0.001, kd = -0.005, sigmaY = 1, sigmaV = 1)
+```
+
+```{r}
+print(fit)
+plot(fit)
+pairs(fit, pars = c("md", "kp", "kd", "sigmaV"))
+
+la <- extract(fit, permuted = TRUE) # return a list of arrays 
+md <- la$md 
+
+### return an array of three dimensions: iterations, chains, parameters 
+a <- extract(fit, permuted = FALSE) 
+
+a2 <- as.array(fit)
+m <- as.matrix(fit)
+d <- as.data.frame(fit)
+```
+
+```{r}
+#install.packages("shinystan")
+```
+
+```{r}
+library(shinystan)
+```
+
+```{r}
+launch_shinystan(adjustedDatafit)
+```
+
+
+
+# Variational Inference - ADVI
+
+```{r}
+# Step 1: Compile the Stan model
+compiled_model <- stan_model(file = 'pdControllerSLVV3_mod3.stan')
+
+# Step 2: Run variational inference
+adjustedDatafit_vi <- vb(
+  object = compiled_model,
+  data = run_data,
+  algorithm = "fullrank",       # or "fullrank"
+  iter = 100,
+  output_samples = 10
+)
+
+```
+
+# MAP Estimate
+```{r}
+compiled_model <- stan_model(file = 'pdControllerSLVV3_mod3.stan')
+optimizing(compiled_model, data = run_data, algorithm="Newton")
+#"1Day10dt_5e-8kp_1e-6_kp_100MD_Sat.csv"
+```
+
+# Plot distance from ideal over time
+```{r}
+d= (run_data$x-run_data$ix[seq(1,q,2)])^2 + (run_data$y-run_data$iy[seq(1,q,2)]) +(run_data$z-run_data$iz[seq(1,q,2)])^2
+d=d^0.5
+plot(d)
+```
+
+```{r}
+dummy = extract(adjustedDatafit)
+halfAccel <- dummy$halfAccel_out
+halfAccel[1,,]
+```
+
