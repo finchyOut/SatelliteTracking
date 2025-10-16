@@ -13,8 +13,8 @@ import constants as const
 
 # ---- Constants ----
 # Use constants from your constants.py file for consistency
-EARTH_RADIUS_M = const.R_EARTH
-GEO_RADIUS_M = const.GEO_RADIUS
+EARTH_RADIUS_M = const.R_EARTH_KM
+GEO_RADIUS_M = const.GEO_RADIUS_KM
 
 # ---------- Helper Functions ----------
 def _as_df(df_or_path: Union[str, pd.DataFrame]) -> pd.DataFrame:
@@ -47,9 +47,9 @@ def plot3d(log_df: pd.DataFrame, title='Satellite Orbit with Earth Centered'):
     """
     Plots only the satellite's trajectory in 3D, color-coded by stationkeeping status.
     """
-    x = log_df["X (m)"].values
-    y = log_df["Y (m)"].values
-    z = log_df["Z (m)"].values
+    x = log_df["X (km)"].values
+    y = log_df["Y (km)"].values
+    z = log_df["Z (km)"].values
     status = log_df["Status"].values
 
     fig = plt.figure(figsize=(10, 10))
@@ -69,9 +69,9 @@ def plot3d(log_df: pd.DataFrame, title='Satellite Orbit with Earth Centered'):
     ax.plot_surface(ex, ey, ez, color='blue', alpha=0.3, linewidth=0)
 
     # Axis labels and title
-    ax.set_xlabel("X (m)")
-    ax.set_ylabel("Y (m)")
-    ax.set_zlabel("Z (m)")
+    ax.set_xlabel("X (km)")
+    ax.set_ylabel("Y (km)")
+    ax.set_zlabel("Z (km)")
     ax.set_title(title)
     ax.legend()
     
@@ -85,8 +85,8 @@ def plot2d(log_df: pd.DataFrame, title='2D XY View of Satellite Orbit'):
     """
     Plots only the satellite's XY projection, with Earth shown as a blue circle.
     """
-    x = log_df["X (m)"].values
-    y = log_df["Y (m)"].values
+    x = log_df["X (km)"].values
+    y = log_df["Y (km)"].values
     status = log_df["Status"].values
 
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -100,8 +100,8 @@ def plot2d(log_df: pd.DataFrame, title='2D XY View of Satellite Orbit'):
     ax.add_artist(earth)
 
     # Formatting
-    ax.set_xlabel("X Position (m)")
-    ax.set_ylabel("Y Position (m)")
+    ax.set_xlabel("X Position (km)")
+    ax.set_ylabel("Y Position (km)")
     ax.set_title(title)
     ax.set_aspect('equal')
     ax.grid(True)
@@ -126,9 +126,9 @@ def plot_controller_performance(log_df: Union[str, pd.DataFrame], policy_params:
 
     # Calculate distance from ideal position using DataFrame columns
     position_error = np.sqrt(
-        (log_df['X (m)'] - log_df['ideal X (m)'])**2 +
-        (log_df['Y (m)'] - log_df['ideal Y (m)'])**2 +
-        (log_df['Z (m)'] - log_df['ideal Z (m)'])**2
+        (log_df['X (km)'] - log_df['ideal X (km)'])**2 +
+        (log_df['Y (km)'] - log_df['ideal Y (km)'])**2 +
+        (log_df['Z (km)'] - log_df['ideal Z (km)'])**2
     ).values
 
     # Magnitude of control acceleration using DataFrame columns
@@ -143,7 +143,7 @@ def plot_controller_performance(log_df: Union[str, pd.DataFrame], policy_params:
     # Plot 1: Position Error
     ax1.plot(log_df['Time (s)'], position_error, label="Position Error")
     ax1.axhline(y=policy_params.get('gamma', 0), color='r', linestyle='--', label='Deadband Radius ($\gamma$)')
-    ax1.set_ylabel("Distance from Ideal Position (m)")
+    ax1.set_ylabel("Distance from Ideal Position (km)")
     ax1.set_title("Controller Performance")
     ax1.grid(True)
     ax1.legend()
@@ -212,9 +212,9 @@ def plot_position_error(log_df: Union[str, pd.DataFrame], policy_params: dict):
 
     # Calculate distance from ideal position using DataFrame columns
     position_error = np.sqrt(
-        (log_df['X (m)'] - log_df['ideal X (m)'])**2 +
-        (log_df['Y (m)'] - log_df['ideal Y (m)'])**2 +
-        (log_df['Z (m)'] - log_df['ideal Z (m)'])**2
+        (log_df['X (km)'] - log_df['ideal X (km)'])**2 +
+        (log_df['Y (km)'] - log_df['ideal Y (km)'])**2 +
+        (log_df['Z (km)'] - log_df['ideal Z (km)'])**2
     ).values
 
     # Create the figure and plot
@@ -223,7 +223,7 @@ def plot_position_error(log_df: Union[str, pd.DataFrame], policy_params: dict):
     ax.plot(log_df['Time (s)'], position_error, label="Position Error")
     ax.axhline(y=policy_params.get('gamma', 0), color='r', linestyle='--', label='Deadband Radius ($\gamma$)')
     ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Distance from Ideal Position (m)")
+    ax.set_ylabel("Distance from Ideal Position (km)")
     ax.set_title("Satellite Position Error Over Time")
     ax.grid(True)
     ax.legend()
