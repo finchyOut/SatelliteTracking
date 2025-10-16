@@ -62,6 +62,33 @@ class OrbitSimulator:
         r_sun = self.sun_pos_km[:, k]
         r_sat_sun = r_sun - r
         return -const.P_R_KM_COEFF * C_R * A / m * (r_sat_sun / np.linalg.norm(r_sat_sun))
+    
+    # PD Control Policy with Soft Threshold (Sigmoid)
+    def _diff_control_policy(self, s: np.ndarray, s_ref: np.ndarray) -> np.ndarray:
+        """
+        Calculates the control acceleration using a PD controller weighted by a 
+        sigmoid function for a smooth transition around the deadband radius gamma.
+        """
+        gamma = self.policy_params.get('gamma', 0)
+        Kp = self.policy_params.get('Kp', 0)
+        Kd = self.policy_params.get('Kd', 0)
+        beta = self.policy_params.get('beta', 1.0) # New parameter for steepness
+
+        delta_r = s[:3] - s_ref[:3]
+        delta_v = s[3:] - s_ref[3:]
+
+        position_error_norm = np.linalg.norm(delta_r)
+
+        # Sigmoid function for soft-switching (output ranges from 0 to 1)
+        # The term (position_error_norm - gamma) shifts the center of the sigmoid
+        # beta controls the steepness of the transition.
+        soft_weight = 1.0 / (1.0 + np.exp(-beta * (position_error_norm - gamma)))
+
+        # Apply the soft weight to the PD control term
+        thrust = soft_weight * (-Kp * delta_r - Kd * delta_v)
+        
+        return thrust
+
 
     # PD Control Policy with Deadband
     def _control_policy(self, s: np.ndarray, s_ref: np.ndarray) -> np.ndarray:
@@ -94,7 +121,8 @@ class OrbitSimulator:
         a_j2 = self._j2_perturbation(r)
         a_3b = self._third_body_perturbation(r, k)
         a_srp = self._srp_perturbation(r, k)
-        a_policy = self._control_policy(s, s_ref)
+        a_policy = self._diff_control_policy(s, s_ref)
+        # a_policy = self._control_policy(s, s_ref)
         
         return a_gravity + a_j2 + a_3b + a_srp + a_policy
 
@@ -129,7 +157,8 @@ class OrbitSimulator:
             v_k = s_k[3:]
             
             # Get the control action for the log
-            a_policy = self._control_policy(s_k, s_ref_k)
+            # a_policy = self._control_policy(s_k, s_ref_k)
+            a_policy = self._diff_control_policy(s_k, s_ref_k)
             control_actions[k] = a_policy
 
             # --- Leapfrog Verlet Algorithm ---
@@ -186,7 +215,8 @@ class OrbitSimulator:
             # Get the total acceleration for the dynamics step
             a_k = self._get_total_acceleration(s_k, t_k, s_ref_k, k)
 
-            a_policy = self._control_policy(s_k, s_ref_k)
+            # a_policy = self._control_policy(s_k, s_ref_k)
+            a_policy = self._diff_control_policy(s_k, s_ref_k)
             
             # Semi-Implicit Euler-Maruyama Step
             v_k_plus_1 = s_k[3:] + a_k * dt
